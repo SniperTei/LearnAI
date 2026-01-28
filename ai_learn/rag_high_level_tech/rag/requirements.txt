@@ -1,0 +1,15 @@
+# DeepSeek + Faiss 本地知识库检索系统
+# 安装：pip install -r requirements.txt
+
+# 核心依赖
+openai>=1.0.0           # DeepSeek API 兼容 OpenAI SDK
+faiss-cpu>=1.7.4        # 向量检索（CPU版本）
+# faiss-gpu>=1.7.4     # GPU版本（如有NVIDIA GPU）
+
+# 文档处理
+python-docx>=0.8.11     # Word文档
+PyPDF2>=3.0.0           # PDF文档
+python-dotenv>=1.0.0    # 环境变量管理
+
+# 可选：更好的文本分块
+sentence-transformers>=2.2.0

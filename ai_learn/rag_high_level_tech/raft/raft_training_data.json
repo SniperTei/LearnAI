@@ -1,0 +1,191 @@
+[
+  {
+    "question": "什么是RAG？",
+    "documents": [
+      {
+        "id": "D3",
+        "content": "RAFT是RAG的一种高级技术，通过微调模型提升抗干扰能力。",
+        "is_relevant": true
+      },
+      {
+        "id": "D7",
+        "content": "机器学习是人工智能的一个分支，使计算机能够从数据中学习。",
+        "is_relevant": false
+      },
+      {
+        "id": "D11",
+        "content": "Docker是一个容器化平台，可以打包应用程序及其依赖项。",
+        "is_relevant": false
+      },
+      {
+        "id": "D1",
+        "content": "RAG（检索增强生成）是一种结合了检索和生成的AI技术。",
+        "is_relevant": true
+      },
+      {
+        "id": "D4",
+        "content": "Embedding将文本转换为向量，使语义相似的文本在向量空间中距离更近。",
+        "is_relevant": true
+      },
+      {
+        "id": "D8",
+        "content": "深度学习使用神经网络模拟人脑的学习过程。",
+        "is_relevant": false
+      },
+      {
+        "id": "D5",
+        "content": "向量数据库如Chroma、Pinecone用于存储和检索文档向量。",
+        "is_relevant": true
+      },
+      {
+        "id": "D10",
+        "content": "SQL是用于管理和查询关系数据库的语言。",
+        "is_relevant": false
+      },
+      {
+        "id": "D12",
+        "content": "Git是一个分布式版本控制系统，用于跟踪代码变化。",
+        "is_relevant": false
+      },
+      {
+        "id": "D2",
+        "content": "RAG通过从外部知识库检索相关文档来增强大语言模型的生成能力。",
+        "is_relevant": true
+      }
+    ],
+    "answer": "根据文档[D1], [D2], [D3], [D4], [D5]，这是关于问题的答案。",
+    "citations": [
+      "D1",
+      "D2",
+      "D3",
+      "D4",
+      "D5"
+    ]
+  },
+  {
+    "question": "RAFT是什么？",
+    "documents": [
+      {
+        "id": "D4",
+        "content": "Embedding将文本转换为向量，使语义相似的文本在向量空间中距离更近。",
+        "is_relevant": true
+      },
+      {
+        "id": "D3",
+        "content": "RAFT是RAG的一种高级技术，通过微调模型提升抗干扰能力。",
+        "is_relevant": true
+      },
+      {
+        "id": "D6",
+        "content": "Python是一种高级编程语言，以其简洁的语法而闻名。",
+        "is_relevant": false
+      },
+      {
+        "id": "D10",
+        "content": "SQL是用于管理和查询关系数据库的语言。",
+        "is_relevant": false
+      },
+      {
+        "id": "D12",
+        "content": "Git是一个分布式版本控制系统，用于跟踪代码变化。",
+        "is_relevant": false
+      },
+      {
+        "id": "D5",
+        "content": "向量数据库如Chroma、Pinecone用于存储和检索文档向量。",
+        "is_relevant": true
+      },
+      {
+        "id": "D11",
+        "content": "Docker是一个容器化平台，可以打包应用程序及其依赖项。",
+        "is_relevant": false
+      },
+      {
+        "id": "D2",
+        "content": "RAG通过从外部知识库检索相关文档来增强大语言模型的生成能力。",
+        "is_relevant": true
+      },
+      {
+        "id": "D1",
+        "content": "RAG（检索增强生成）是一种结合了检索和生成的AI技术。",
+        "is_relevant": true
+      },
+      {
+        "id": "D8",
+        "content": "深度学习使用神经网络模拟人脑的学习过程。",
+        "is_relevant": false
+      }
+    ],
+    "answer": "根据文档[D1], [D2], [D3], [D4], [D5]，这是关于问题的答案。",
+    "citations": [
+      "D1",
+      "D2",
+      "D3",
+      "D4",
+      "D5"
+    ]
+  },
+  {
+    "question": "什么是向量数据库？",
+    "documents": [
+      {
+        "id": "D11",
+        "content": "Docker是一个容器化平台，可以打包应用程序及其依赖项。",
+        "is_relevant": false
+      },
+      {
+        "id": "D2",
+        "content": "RAG通过从外部知识库检索相关文档来增强大语言模型的生成能力。",
+        "is_relevant": true
+      },
+      {
+        "id": "D5",
+        "content": "向量数据库如Chroma、Pinecone用于存储和检索文档向量。",
+        "is_relevant": true
+      },
+      {
+        "id": "D1",
+        "content": "RAG（检索增强生成）是一种结合了检索和生成的AI技术。",
+        "is_relevant": true
+      },
+      {
+        "id": "D6",
+        "content": "Python是一种高级编程语言，以其简洁的语法而闻名。",
+        "is_relevant": false
+      },
+      {
+        "id": "D3",
+        "content": "RAFT是RAG的一种高级技术，通过微调模型提升抗干扰能力。",
+        "is_relevant": true
+      },
+      {
+        "id": "D8",
+        "content": "深度学习使用神经网络模拟人脑的学习过程。",
+        "is_relevant": false
+      },
+      {
+        "id": "D12",
+        "content": "Git是一个分布式版本控制系统，用于跟踪代码变化。",
+        "is_relevant": false
+      },
+      {
+        "id": "D10",
+        "content": "SQL是用于管理和查询关系数据库的语言。",
+        "is_relevant": false
+      },
+      {
+        "id": "D4",
+        "content": "Embedding将文本转换为向量，使语义相似的文本在向量空间中距离更近。",
+        "is_relevant": true
+      }
+    ],
+    "answer": "根据文档[D1], [D2], [D3], [D4], [D5]，这是关于问题的答案。",
+    "citations": [
+      "D1",
+      "D2",
+      "D3",
+      "D4",
+      "D5"
+    ]
+  }
+]
