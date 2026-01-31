@@ -5,7 +5,7 @@ Text2SQL 基础版本 - 使用 LangChain SQL Agent
 
 import os
 from langchain_community.utilities import SQLDatabase
-from langchain.agents import create_sql_agent, AgentType
+from langchain_community.agent_toolkits import create_sql_agent
 from langchain_openai import ChatOpenAI
 from dotenv import load_dotenv
 
@@ -45,7 +45,7 @@ class Text2SQLAgent:
         self.agent = create_sql_agent(
             llm=self.llm,
             db=self.db,
-            agent_type=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
+            agent_type="zero-shot-react-description",
             verbose=True  # 设置为 True 可以看到推理过程
         )
         print("✓ SQL Agent 创建完成")

@@ -1,22 +1,21 @@
 """
-Text2SQL Streamlit 演示应用
+Text2SQL Streamlit 演示应用 - 使用本地 Ollama
 一个友好的 Web 界面，让用户用自然语言查询数据库
 """
 
 import streamlit as st
 import pandas as pd
 import sqlite3
-import os
-from langchain_openai import ChatOpenAI
-from langchain_core.prompts import ChatPromptTemplate, FewShotChatMessagePromptTemplate
-from dotenv import load_dotenv
+import requests
+import json
 
-# 加载环境变量
-load_dotenv()
+# Ollama 配置
+OLLAMA_BASE_URL = "http://localhost:11434"
+CHAT_MODEL = "deepseek-r1:7b"  # 或使用其他模型如 "qwen2.5:7b"
 
 # 页面配置
 st.set_page_config(
-    page_title="Text2SQL 智能查询助手",
+    page_title="Text2SQL 智能查询助手 (Ollama)",
     page_icon="🤖",
     layout="wide"
 )
@@ -90,75 +89,100 @@ def get_schema():
     return schema_info
 
 
-def init_llm():
-    """初始化 LLM"""
-    if not os.getenv('OPENAI_API_KEY'):
-        st.error("❌ 请先设置 OPENAI_API_KEY 环境变量")
-        st.info("💡 在项目目录创建 .env 文件，添加: OPENAI_API_KEY=your_key_here")
-        return None
-
-    return ChatOpenAI(
-        model='gpt-4o',
-        temperature=0
-    )
+def check_ollama():
+    """检查 Ollama 是否运行"""
+    try:
+        response = requests.get(f"{OLLAMA_BASE_URL}/api/tags", timeout=5)
+        return response.status_code == 200
+    except:
+        return False
 
 
-def create_prompt_template():
-    """创建 Prompt 模板"""
-    examples = [
-        {
-            "question": "有多少个客户？",
-            "sql": "SELECT COUNT(*) as total FROM customers;"
-        },
-        {
-            "question": "查询年龄在30到40岁之间的女性客户",
-            "sql": "SELECT * FROM customers WHERE age BETWEEN 30 AND 40 AND gender = '女';"
-        },
-        {
-            "question": "统计每个产品的保单数量",
-            "sql": "SELECT p.product_name, COUNT(po.policy_id) as policy_count FROM products p LEFT JOIN policies po ON p.product_id = po.product_id GROUP BY p.product_id, p.product_name;"
-        },
-    ]
+def call_ollama(prompt: str, system_prompt: str = "") -> str:
+    """
+    调用 Ollama API
 
-    example_prompt = ChatPromptTemplate.from_messages([
-        ("human", "{question}\nSQL: {sql}")
-    ])
+    Args:
+        prompt: 用户提示
+        system_prompt: 系统提示
 
-    few_shot_prompt = FewShotChatMessagePromptTemplate(
-        example_prompt=example_prompt,
-        examples=examples,
-    )
+    Returns:
+        模型响应
+    """
+    messages = []
 
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", """你是一个 SQL 专家。根据用户的问题和数据库 schema，生成准确的 SQLite 查询语句。
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+
+    messages.append({"role": "user", "content": prompt})
+
+    try:
+        response = requests.post(
+            f"{OLLAMA_BASE_URL}/api/chat",
+            json={
+                "model": CHAT_MODEL,
+                "messages": messages,
+                "stream": False,
+                "options": {
+                    "temperature": 0.1,  # 降低温度以提高 SQL 准确性
+                    "num_predict": 500
+                }
+            },
+            timeout=120
+        )
+        response.raise_for_status()
+        result = response.json()
+        return result.get("message", {}).get("content", "")
+    except Exception as e:
+        return f"Error: {str(e)}"
+
+
+def generate_sql(schema: str, question: str) -> str:
+    """使用 Ollama 生成 SQL"""
+
+    # 示例
+    examples = """
+示例1:
+问题: 有多少个客户？
+SQL: SELECT COUNT(*) as total FROM customers;
+
+示例2:
+问题: 查询年龄在30到40岁之间的女性客户
+SQL: SELECT * FROM customers WHERE age BETWEEN 30 AND 40 AND gender = '女';
+
+示例3:
+问题: 统计每个产品的保单数量
+SQL: SELECT p.product_name, COUNT(po.policy_id) as policy_count FROM products p LEFT JOIN policies po ON p.product_id = po.product_id GROUP BY p.product_id, p.product_name;
+"""
+
+    system_prompt = """你是一个 SQL 专家。根据用户的问题和数据库 schema，生成准确的 SQLite 查询语句。
 
 要求：
 1. 只返回 SQL 语句，不要解释
-2. 使用合适的表连接
-3. 添加必要的条件过滤
-4. 限制结果数量避免返回过多数据（使用 LIMIT）
+2. 使用合适的表连接（JOIN）
+3. 添加必要的条件过滤（WHERE）
+4. 限制结果数量避免返回过多数据（使用 LIMIT，建议限制100条）
 5. 确保语法正确
+6. 不要使用 markdown 格式（不要用 ```sql 包裹）
+7. 直接输出 SQL 语句"""
 
-数据库 Schema:
-{schema}"""),
-        few_shot_prompt,
-        ("human", "{question}")
-    ])
+    prompt = f"""数据库 Schema:
+{schema}
 
-    return prompt
+{examples}
 
+请为以下问题生成 SQL 查询：
 
-def generate_sql(llm, prompt, schema, question):
-    """生成 SQL"""
-    messages = prompt.format_messages(
-        schema=schema,
-        question=question
-    )
+问题: {question}
 
-    response = llm.invoke(messages)
-    sql = response.content.strip()
+SQL:"""
 
-    # 清理 markdown 标记
+    response = call_ollama(prompt, system_prompt)
+
+    # 清理响应
+    sql = response.strip()
+
+    # 移除可能的 markdown 标记
     if sql.startswith("```sql"):
         sql = sql[6:]
     if sql.startswith("```"):
@@ -166,7 +190,24 @@ def generate_sql(llm, prompt, schema, question):
     if sql.endswith("```"):
         sql = sql[:-3]
 
+    # 移除可能的 "SQL:" 前缀
+    if sql.startswith("SQL:"):
+        sql = sql[4:]
+
     return sql.strip()
+
+
+def explain_result(question: str, sql: str, results: str) -> str:
+    """让 Ollama 解释查询结果"""
+    system_prompt = "你是一个数据分析助手。请用简洁友好的中文解释查询结果，不超过2句话。"
+
+    prompt = f"""问题: {question}
+SQL: {sql}
+结果: {results[:1000]}
+
+请解释这个结果。"""
+
+    return call_ollama(prompt, system_prompt)
 
 
 def execute_query(sql):
@@ -182,45 +223,30 @@ def execute_query(sql):
         return {"error": str(e)}
 
 
-def explain_result(llm, question, sql, results):
-    """让 LLM 解释查询结果"""
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", "你是一个数据分析助手。请用简洁友好的中文解释查询结果，不超过2句话。"),
-        ("human", "问题: {question}\nSQL: {sql}\n结果: {results}\n请解释这个结果。")
-    ])
-
-    messages = prompt.format_messages(
-        question=question,
-        sql=sql,
-        results=str(results)[:1000]  # 限制长度
-    )
-
-    return llm.invoke(messages).content
-
-
 def main():
     """主应用"""
     init_session_state()
 
     # 标题
-    st.markdown('<h1 class="main-header">🤖 Text2SQL 智能查询助手</h1>', unsafe_allow_html=True)
+    st.markdown('<h1 class="main-header">🤖 Text2SQL 智能查询助手 (Ollama)</h1>', unsafe_allow_html=True)
 
     # 侧边栏
     with st.sidebar:
         st.header("⚙️ 设置")
 
-        # API Key 检查
-        if not os.getenv('OPENAI_API_KEY'):
-            st.error("❌ 未检测到 OPENAI_API_KEY")
+        # Ollama 状态检查
+        if check_ollama():
+            st.success(f"✅ Ollama 运行中")
+            st.info(f"📝 模型: {CHAT_MODEL}")
+        else:
+            st.error("❌ 无法连接到 Ollama")
             st.info("""
-            请在项目目录创建 .env 文件，添加:
-            ```
-            OPENAI_API_KEY=your_key_here
-            ```
+            请确保 Ollama 正在运行:
+            1. 安装 Ollama: https://ollama.com
+            2. 启动服务: ollama serve
+            3. 拉取模型: ollama pull deepseek-r1:7b
             """)
             st.stop()
-
-        st.success("✅ API Key 已配置")
 
         st.divider()
 
@@ -288,21 +314,12 @@ def main():
     submit_button = st.button("🔍 查询", type="primary", use_container_width=True)
 
     if submit_button and question:
-        # 初始化 LLM
-        with st.spinner("正在初始化..."):
-            llm = init_llm()
-            if not llm:
-                st.stop()
-
         # 获取 schema
         schema = get_schema()
 
-        # 创建 prompt
-        prompt = create_prompt_template()
-
         # 生成 SQL
         with st.spinner("正在生成 SQL..."):
-            sql = generate_sql(llm, prompt, schema, question)
+            sql = generate_sql(schema, question)
 
         # 显示生成的 SQL
         st.subheader("📝 生成的 SQL")
@@ -330,7 +347,7 @@ def main():
 
                 # 让 LLM 解释结果
                 with st.spinner("正在生成结果解释..."):
-                    explanation = explain_result(llm, question, sql, results)
+                    explanation = explain_result(question, sql, str(results))
 
                 st.subheader("💡 结果解释")
                 st.success(explanation)

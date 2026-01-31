@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+venv/
+ENV/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# RAG 索引文件（自动生成，不提交）
+*.bin
+*.pkl
+
+# Ollama 模型文件（巨大，不提交
+*.gguf
+*.bin
+
+# 日志文件
+*.log
+
+# 临时文件
+test_*.py
+*.tmp

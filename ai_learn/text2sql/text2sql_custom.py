@@ -6,7 +6,7 @@ Text2SQL 自定义版本 - 使用自定义 Prompt
 import os
 import sqlite3
 from langchain_openai import ChatOpenAI
-from langchain.prompts import ChatPromptTemplate, FewShotChatMessagePromptTemplate
+from langchain_core.prompts import ChatPromptTemplate, FewShotChatMessagePromptTemplate
 from dotenv import load_dotenv
 
 load_dotenv()
