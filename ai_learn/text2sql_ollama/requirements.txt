@@ -1,0 +1,7 @@
+streamlit
+pandas
+sqlite3
+langchain-community
+python-dotenv
+sqlalchemy
+psycopg2-binary
