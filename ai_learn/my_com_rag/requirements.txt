@@ -1,0 +1,38 @@
+# Web Framework
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+python-multipart>=0.0.6
+
+# LangChain & AI
+langchain>=0.1.6
+langchain-community>=0.0.19
+langchain-openai>=0.0.2
+langchain-text-splitters
+zhipuai>=2.1.5.20250825
+
+# Vector Store
+chromadb>=0.4.22
+faiss-cpu>=1.13.0
+langchain-chroma
+
+# RAG优化
+sentence-transformers>=2.2.2
+
+# Document Processing
+pypdf>=3.17.4
+python-docx>=1.1.0
+docx2txt>=0.8
+unstructured>=0.11.6
+pillow>=10.2.0
+python-magic>=0.4.27
+PyMuPDF>=1.23.0
+
+# Utilities
+python-dotenv>=1.0.0
+pydantic>=2.5.3
+pydantic-settings>=2.1.0
+aiofiles>=23.2.1
+
+# File Processing
+openpyxl>=3.1.2
+pandas>=2.2.0

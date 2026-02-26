@@ -1,0 +1,1226 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>企业知识库 - 智能问答系统</title>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --primary: #4F46E5;
+            --primary-dark: #4338CA;
+            --primary-light: #818CF8;
+            --secondary: #EC4899;
+            --success: #10B981;
+            --warning: #F59E0B;
+            --danger: #EF4444;
+            --dark: #1F2937;
+            --gray: #6B7280;
+            --light: #F3F4F6;
+            --white: #FFFFFF;
+            --shadow: rgba(0, 0, 0, 0.1);
+            --shadow-lg: rgba(0, 0, 0, 0.15);
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB',
+                'Microsoft YaHei', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 0;
+            color: var(--dark);
+        }
+
+        /* 顶部导航栏 */
+        .navbar {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            box-shadow: 0 2px 20px var(--shadow);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .navbar-content {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 1rem 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .logo-icon {
+            width: 45px;
+            height: 45px;
+            background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+        }
+
+        .logo-text {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .logo-title {
+            font-size: 1.2rem;
+            font-weight: 700;
+            color: var(--dark);
+            line-height: 1.2;
+        }
+
+        .logo-subtitle {
+            font-size: 0.75rem;
+            color: var(--gray);
+        }
+
+        .user-section {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .user-avatar {
+            width: 40px;
+            height: 40px;
+            background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: 600;
+            font-size: 16px;
+        }
+
+        .user-details {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .user-name {
+            font-weight: 600;
+            font-size: 14px;
+            color: var(--dark);
+        }
+
+        .user-role {
+            font-size: 12px;
+            color: var(--gray);
+        }
+
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 10px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+            color: white;
+            box-shadow: 0 4px 15px rgba(79, 70, 229, 0.3);
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(79, 70, 229, 0.4);
+        }
+
+        .btn-secondary {
+            background: var(--light);
+            color: var(--dark);
+        }
+
+        .btn-secondary:hover {
+            background: #E5E7EB;
+        }
+
+        /* 主容器 */
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        /* 卡片 */
+        .card {
+            background: var(--white);
+            border-radius: 20px;
+            padding: 2rem;
+            box-shadow: 0 10px 40px var(--shadow-lg);
+            margin-bottom: 2rem;
+        }
+
+        .card-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 1.5rem;
+        }
+
+        .card-icon {
+            width: 40px;
+            height: 40px;
+            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-light) 100%);
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+        }
+
+        .card-title {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--dark);
+        }
+
+        /* 输入框 */
+        .search-box {
+            margin-bottom: 1.5rem;
+        }
+
+        .search-input {
+            width: 100%;
+            padding: 16px 20px;
+            border: 2px solid var(--light);
+            border-radius: 15px;
+            font-size: 16px;
+            transition: all 0.3s ease;
+            background: var(--light);
+        }
+
+        .search-input:focus {
+            outline: none;
+            border-color: var(--primary);
+            background: var(--white);
+            box-shadow: 0 0 0 4px rgba(79, 70, 229, 0.1);
+        }
+
+        .button-group {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .btn-full {
+            flex: 1;
+            min-width: 120px;
+            justify-content: center;
+        }
+
+        /* 回答区域 */
+        .response-area {
+            min-height: 200px;
+            max-height: 500px;
+            overflow-y: auto;
+            padding: 1.5rem;
+            background: linear-gradient(135deg, #F9FAFB 0%, #F3F4F6 100%);
+            border-radius: 15px;
+            margin-top: 1.5rem;
+        }
+
+        .answer {
+            background: var(--white);
+            padding: 1.5rem;
+            border-radius: 12px;
+            margin-bottom: 1rem;
+            box-shadow: 0 2px 10px var(--shadow);
+            border-left: 4px solid var(--primary);
+        }
+
+        /* Markdown 样式 */
+        .answer h1, .answer h2, .answer h3 {
+            margin-top: 1rem;
+            margin-bottom: 0.5rem;
+            color: var(--dark);
+        }
+        .answer h1 { font-size: 1.5em; }
+        .answer h2 { font-size: 1.3em; }
+        .answer h3 { font-size: 1.1em; }
+        .answer p {
+            margin-bottom: 0.75rem;
+            line-height: 1.7;
+        }
+        .answer ul, .answer ol {
+            margin-left: 1.5rem;
+            margin-bottom: 0.75rem;
+        }
+        .answer li {
+            margin-bottom: 0.5rem;
+        }
+        .answer strong {
+            color: var(--primary);
+            font-weight: 600;
+        }
+        .answer code {
+            background: var(--light);
+            padding: 2px 8px;
+            border-radius: 6px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+        }
+        .answer pre {
+            background: var(--dark);
+            color: var(--white);
+            padding: 1rem;
+            border-radius: 10px;
+            overflow-x: auto;
+            margin: 1rem 0;
+        }
+        .answer pre code {
+            background: transparent;
+            padding: 0;
+        }
+
+        .sources {
+            margin-top: 1.5rem;
+            padding-top: 1.5rem;
+            border-top: 2px solid var(--light);
+        }
+
+        .sources h4 {
+            color: var(--gray);
+            margin-bottom: 1rem;
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .source-item {
+            background: var(--light);
+            padding: 1rem;
+            border-radius: 10px;
+            margin-bottom: 0.75rem;
+            font-size: 14px;
+            transition: all 0.3s ease;
+        }
+
+        .source-item:hover {
+            background: #E5E7EB;
+        }
+
+        .source-item .meta {
+            color: var(--gray);
+            font-size: 12px;
+            margin-top: 0.5rem;
+        }
+
+        /* 图片显示样式 */
+        .source-images {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin-top: 12px;
+        }
+
+        .source-image {
+            flex: 0 0 auto;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .source-image:hover {
+            transform: scale(1.05);
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+        }
+
+        .source-image img {
+            width: 150px;
+            height: 150px;
+            object-fit: cover;
+            cursor: pointer;
+            display: block;
+        }
+
+        @media (max-width: 768px) {
+            .source-image img {
+                width: 120px;
+                height: 120px;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .source-images {
+                justify-content: center;
+            }
+
+            .source-image img {
+                width: 100px;
+                height: 100px;
+            }
+        }
+
+        /* 上传区域 */
+        .upload-area {
+            border: 3px dashed var(--primary-light);
+            border-radius: 20px;
+            padding: 3rem 2rem;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            background: linear-gradient(135deg, #EEF2FF 0%, #E0E7FF 100%);
+        }
+
+        .upload-area:hover, .upload-area.dragover {
+            border-color: var(--primary);
+            background: linear-gradient(135deg, #E0E7FF 0%, #C7D2FE 100%);
+            transform: scale(1.02);
+        }
+
+        .upload-icon {
+            width: 80px;
+            height: 80px;
+            margin: 0 auto 1rem;
+            background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+            border-radius: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 40px;
+        }
+
+        .upload-text {
+            font-size: 1.1rem;
+            color: var(--dark);
+            margin-bottom: 0.5rem;
+        }
+
+        .upload-hint {
+            font-size: 0.9rem;
+            color: var(--gray);
+        }
+
+        .file-info {
+            margin-top: 1rem;
+            padding: 1rem;
+            background: var(--white);
+            border-radius: 10px;
+            display: none;
+            box-shadow: 0 2px 10px var(--shadow);
+        }
+
+        .file-info.show {
+            display: block;
+        }
+
+        /* 统计信息 */
+        .stats {
+            margin-top: 1.5rem;
+            padding: 1.5rem;
+            background: linear-gradient(135deg, #F9FAFB 0%, #F3F4F6 100%);
+            border-radius: 15px;
+        }
+
+        .stats h3 {
+            color: var(--dark);
+            margin-bottom: 1rem;
+            font-size: 1rem;
+            font-weight: 600;
+        }
+
+        .stats-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 0.75rem 0;
+            border-bottom: 1px solid #E5E7EB;
+        }
+
+        .stats-item:last-child {
+            border-bottom: none;
+        }
+
+        .stats-label {
+            color: var(--gray);
+            font-size: 14px;
+        }
+
+        .stats-value {
+            font-weight: 600;
+            color: var(--primary);
+        }
+
+        /* 历史记录表格 */
+        .history-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1rem;
+        }
+
+        .history-table th,
+        .history-table td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #E5E7EB;
+        }
+
+        .history-table th {
+            background: var(--light);
+            font-weight: 600;
+            color: var(--dark);
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .history-table tr:hover {
+            background: #F9FAFB;
+        }
+
+        /* 加载动画 */
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid var(--light);
+            border-top: 3px solid var(--primary);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* 消息提示 */
+        .message {
+            padding: 1rem;
+            border-radius: 10px;
+            margin: 1rem 0;
+        }
+
+        .error {
+            background: #FEE2E2;
+            color: #DC2626;
+        }
+
+        .success {
+            background: #D1FAE5;
+            color: #059669;
+        }
+
+        /* 登录对话框 */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(5px);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+            padding: 1rem;
+        }
+
+        .modal-overlay.show {
+            display: flex;
+        }
+
+        .modal {
+            background: var(--white);
+            border-radius: 24px;
+            padding: 2.5rem;
+            width: 100%;
+            max-width: 400px;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+            animation: slideUp 0.3s ease;
+        }
+
+        @keyframes slideUp {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .modal h2 {
+            color: var(--dark);
+            margin-bottom: 1.5rem;
+            text-align: center;
+            font-size: 1.5rem;
+        }
+
+        .form-group {
+            margin-bottom: 1.25rem;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 0.5rem;
+            color: var(--dark);
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 12px 16px;
+            border: 2px solid var(--light);
+            border-radius: 10px;
+            font-size: 14px;
+            transition: all 0.3s ease;
+        }
+
+        .form-group input:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 4px rgba(79, 70, 229, 0.1);
+        }
+
+        /* 响应式设计 */
+        @media (max-width: 768px) {
+            .navbar-content {
+                padding: 1rem;
+            }
+
+            .logo-subtitle {
+                display: none;
+            }
+
+            .container {
+                padding: 1rem;
+            }
+
+            .card {
+                padding: 1.5rem;
+                border-radius: 15px;
+            }
+
+            .card-title {
+                font-size: 1.25rem;
+            }
+
+            .button-group {
+                flex-direction: column;
+            }
+
+            .btn {
+                width: 100%;
+            }
+
+            .upload-area {
+                padding: 2rem 1rem;
+            }
+
+            .upload-icon {
+                width: 60px;
+                height: 60px;
+                font-size: 30px;
+            }
+
+            .response-area {
+                max-height: 400px;
+                padding: 1rem;
+            }
+
+            .answer {
+                padding: 1rem;
+            }
+
+            .user-section {
+                gap: 8px;
+            }
+
+            .user-details {
+                display: none;
+            }
+
+            .btn {
+                padding: 8px 16px;
+                font-size: 13px;
+            }
+
+            .history-table {
+                font-size: 12px;
+            }
+
+            .history-table th,
+            .history-table td {
+                padding: 8px 6px;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .navbar-content {
+                flex-direction: column;
+                gap: 1rem;
+            }
+
+            .logo {
+                width: 100%;
+                justify-content: center;
+            }
+
+            .user-section {
+                width: 100%;
+                justify-content: center;
+            }
+
+            .card-header {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 0.5rem;
+            }
+
+            .search-input {
+                padding: 14px 16px;
+                font-size: 15px;
+            }
+
+            .upload-text {
+                font-size: 1rem;
+            }
+
+            .history-table {
+                display: block;
+                overflow-x: auto;
+            }
+
+            .history-table table {
+                min-width: 100%;
+            }
+        }
+
+        /* 隐藏元素 */
+        .hidden {
+            display: none !important;
+        }
+    </style>
+</head>
+<body>
+    <!-- 登录对话框 -->
+    <div class="modal-overlay" id="loginModal">
+        <div class="modal">
+            <h2>🔐 管理员登录</h2>
+            <div class="form-group">
+                <label>用户名</label>
+                <input type="text" id="loginUsername" placeholder="请输入用户名" onkeypress="if(event.key === 'Enter') login()">
+            </div>
+            <div class="form-group">
+                <label>密码</label>
+                <input type="password" id="loginPassword" placeholder="请输入密码" onkeypress="if(event.key === 'Enter') login()">
+            </div>
+            <button class="btn btn-primary btn-full" onclick="login()">
+                <span id="loginBtnText">登录</span>
+            </button>
+            <div id="loginMessage"></div>
+        </div>
+    </div>
+
+    <!-- 导航栏 -->
+    <nav class="navbar">
+        <div class="navbar-content">
+            <div class="logo">
+                <div class="logo-icon">🤖</div>
+                <div class="logo-text">
+                    <span class="logo-title">企业知识库</span>
+                    <span class="logo-subtitle">智能问答系统</span>
+                </div>
+            </div>
+            <div class="user-section">
+                <div class="user-info hidden" id="userInfoSection">
+                    <div class="user-avatar" id="userAvatar">A</div>
+                    <div class="user-details">
+                        <span class="user-name" id="userName">Admin</span>
+                        <span class="user-role" id="userRole">管理员</span>
+                    </div>
+                </div>
+                <div id="loginSection">
+                    <button class="btn btn-primary" onclick="showLoginModal()">登录</button>
+                </div>
+                <button class="btn btn-secondary hidden" id="logoutBtn" onclick="logout()">退出</button>
+            </div>
+        </div>
+    </nav>
+
+    <!-- 主容器 -->
+    <div class="container">
+        <!-- 问答卡片 -->
+        <div class="card">
+            <div class="card-header">
+                <div class="card-icon">💬</div>
+                <h2 class="card-title">智能问答</h2>
+            </div>
+            <div class="search-box">
+                <input
+                    type="text"
+                    class="search-input"
+                    id="questionInput"
+                    placeholder="请输入您的问题..."
+                    onkeypress="if(event.key === 'Enter') askQuestion()"
+                >
+            </div>
+            <div class="button-group">
+                <button class="btn btn-primary btn-full" onclick="askQuestion()">
+                    <span id="askBtnText">提问</span>
+                    <span id="askLoading" class="loading" style="display: none;"></span>
+                </button>
+                <button class="btn btn-secondary btn-full" onclick="searchOnly()">仅搜索</button>
+            </div>
+            <div class="response-area" id="responseArea">
+                <p style="text-align: center; color: var(--gray);">AI的回答将显示在这里...</p>
+            </div>
+        </div>
+
+        <!-- 上传卡片（仅管理员可见） -->
+        <div class="card upload-card hidden" id="uploadCard">
+            <div class="card-header">
+                <div class="card-icon">📁</div>
+                <h2 class="card-title">文档上传</h2>
+            </div>
+            <div class="upload-area" id="uploadArea">
+                <div class="upload-icon">📄</div>
+                <p class="upload-text">点击或拖拽文件到此处</p>
+                <p class="upload-hint">支持 PDF, DOCX, TXT, MD, XLSX</p>
+                <input type="file" id="fileInput" style="display: none" onchange="handleFileSelect(event)">
+            </div>
+            <div class="file-info" id="fileInfo"></div>
+            <button class="btn btn-primary btn-full" style="margin-top: 1rem;" onclick="uploadFile()">
+                <span id="uploadBtnText">上传文档</span>
+                <span id="uploadLoading" class="loading" style="display: none;"></span>
+            </button>
+
+            <!-- 知识库统计 -->
+            <div class="stats" id="statsArea">
+                <h3>📊 知识库信息</h3>
+                <div id="statsContent">加载中...</div>
+            </div>
+
+            <!-- 上传历史 -->
+            <div class="stats hidden" id="historyArea">
+                <h3>📝 上传历史</h3>
+                <div id="historyContent"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:8219';
+        let selectedFile = null;
+        let currentUser = null;
+
+        // 页面加载
+        window.addEventListener('load', () => {
+            const savedUser = localStorage.getItem('kb_user');
+            if (savedUser) {
+                currentUser = JSON.parse(savedUser);
+                updateUserInterface();
+            } else {
+                // 未登录状态
+                document.querySelector('.navbar').style.display = 'flex';
+                document.getElementById('uploadCard').classList.add('hidden');
+            }
+            loadStats();
+        });
+
+        // 登录对话框
+        function showLoginModal() {
+            document.getElementById('loginModal').classList.add('show');
+        }
+
+        function hideLoginModal() {
+            document.getElementById('loginModal').classList.remove('show');
+        }
+
+        // 登录
+        async function login() {
+            const username = document.getElementById('loginUsername').value.trim();
+            const password = document.getElementById('loginPassword').value;
+            const messageDiv = document.getElementById('loginMessage');
+
+            if (!username || !password) {
+                messageDiv.innerHTML = '<div class="message error">请输入用户名和密码</div>';
+                return;
+            }
+
+            document.getElementById('loginBtnText').textContent = '登录中...';
+
+            try {
+                const response = await fetch(`${API_BASE}/api/login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password })
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    currentUser = {
+                        username: result.username,
+                        role: result.role,
+                        token: result.token
+                    };
+                    localStorage.setItem('kb_user', JSON.stringify(currentUser));
+                    hideLoginModal();
+                    updateUserInterface();
+                    messageDiv.innerHTML = '';
+                    document.getElementById('loginUsername').value = '';
+                    document.getElementById('loginPassword').value = '';
+                } else {
+                    messageDiv.innerHTML = `<div class="message error">${result.message}</div>`;
+                }
+            } catch (error) {
+                messageDiv.innerHTML = `<div class="message error">登录失败: ${error.message}</div>`;
+            } finally {
+                document.getElementById('loginBtnText').textContent = '登录';
+            }
+        }
+
+        // 登出
+        function logout() {
+            currentUser = null;
+            localStorage.removeItem('kb_user');
+
+            document.getElementById('userInfoSection').classList.add('hidden');
+            document.getElementById('loginSection').classList.remove('hidden');
+            document.getElementById('logoutBtn').classList.add('hidden');
+            document.getElementById('uploadCard').classList.add('hidden');
+            document.getElementById('historyArea').classList.add('hidden');
+        }
+
+        // 更新用户界面
+        function updateUserInterface() {
+            if (!currentUser) return;
+
+            document.getElementById('userInfoSection').classList.remove('hidden');
+            document.getElementById('userName').textContent = currentUser.username;
+            document.getElementById('userRole').textContent = currentUser.role === 'admin' ? '管理员' : '用户';
+            document.getElementById('userAvatar').textContent = currentUser.username.charAt(0).toUpperCase();
+
+            document.getElementById('loginSection').classList.add('hidden');
+            document.getElementById('logoutBtn').classList.remove('hidden');
+
+            // 只有管理员能看到上传区域
+            if (currentUser.role === 'admin') {
+                document.getElementById('uploadCard').classList.remove('hidden');
+                document.getElementById('historyArea').classList.remove('hidden');
+                loadHistory();
+            }
+        }
+
+        // 拖拽上传
+        const uploadArea = document.getElementById('uploadArea');
+
+        uploadArea.addEventListener('click', () => {
+            document.getElementById('fileInput').click();
+        });
+
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.classList.add('dragover');
+        });
+
+        uploadArea.addEventListener('dragleave', () => {
+            uploadArea.classList.remove('dragover');
+        });
+
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                handleFileSelect({ target: { files: files } });
+            }
+        });
+
+        // 文件选择
+        function handleFileSelect(event) {
+            const file = event.target.files[0];
+            if (file) {
+                selectedFile = file;
+                const fileInfo = document.getElementById('fileInfo');
+                const sizeMB = (file.size / 1024 / 1024).toFixed(2);
+                fileInfo.innerHTML = `
+                    <strong>已选择:</strong> ${file.name}<br>
+                    <small style="color: var(--gray);">${sizeMB} MB</small>
+                `;
+                fileInfo.classList.add('show');
+            }
+        }
+
+        // 上传文件
+        async function uploadFile() {
+            if (!selectedFile) {
+                alert('请先选择文件');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('file', selectedFile);
+
+            document.getElementById('uploadLoading').style.display = 'inline-block';
+            document.getElementById('uploadBtnText').textContent = '上传中...';
+
+            try {
+                const headers = {};
+                if (currentUser && currentUser.token) {
+                    headers['username'] = currentUser.token;
+                }
+
+                const response = await fetch(`${API_BASE}/api/upload`, {
+                    method: 'POST',
+                    headers: headers,
+                    body: formData
+                });
+
+                if (response.status === 403) {
+                    showMessage('权限不足：只有管理员才能上传文件', 'error');
+                    return;
+                }
+
+                const result = await response.json();
+
+                if (result.success) {
+                    showMessage(`成功上传 ${result.file_name}，处理了 ${result.document_count} 个文档块`, 'success');
+                    selectedFile = null;
+                    document.getElementById('fileInfo').classList.remove('show');
+                    document.getElementById('fileInput').value = '';
+                    loadStats();
+                    loadHistory();
+                } else {
+                    showMessage('上传失败: ' + result.message, 'error');
+                }
+            } catch (error) {
+                showMessage('上传失败: ' + error.message, 'error');
+            } finally {
+                document.getElementById('uploadLoading').style.display = 'none';
+                document.getElementById('uploadBtnText').textContent = '上传文档';
+            }
+        }
+
+        // 提问
+        async function askQuestion() {
+            const question = document.getElementById('questionInput').value.trim();
+            if (!question) {
+                alert('请输入问题');
+                return;
+            }
+
+            document.getElementById('askLoading').style.display = 'inline-block';
+            document.getElementById('askBtnText').textContent = '思考中...';
+            document.getElementById('responseArea').innerHTML = '<p style="text-align: center; color: var(--gray);">正在思考...</p>';
+
+            try {
+                const response = await fetch(`${API_BASE}/api/ask`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ question: question, use_rag: true })
+                });
+
+                const result = await response.json();
+                displayResponse(result);
+            } catch (error) {
+                document.getElementById('responseArea').innerHTML = `<div class="message error">请求失败: ${error.message}</div>`;
+            } finally {
+                document.getElementById('askLoading').style.display = 'none';
+                document.getElementById('askBtnText').textContent = '提问';
+            }
+        }
+
+        // 仅搜索
+        async function searchOnly() {
+            const question = document.getElementById('questionInput').value.trim();
+            if (!question) {
+                alert('请输入问题');
+                return;
+            }
+
+            document.getElementById('askLoading').style.display = 'inline-block';
+            document.getElementById('askBtnText').textContent = '搜索中...';
+
+            try {
+                const response = await fetch(`${API_BASE}/api/ask`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ question: question, use_rag: false })
+                });
+
+                const result = await response.json();
+                displayResponse(result);
+            } catch (error) {
+                document.getElementById('responseArea').innerHTML = `<div class="message error">搜索失败: ${error.message}</div>`;
+            } finally {
+                document.getElementById('askLoading').style.display = 'none';
+                document.getElementById('askBtnText').textContent = '提问';
+            }
+        }
+
+        // 显示响应
+        function displayResponse(result) {
+            const responseArea = document.getElementById('responseArea');
+            const renderedAnswer = marked.parse(result.answer);
+            let html = `<div class="answer">${renderedAnswer}</div>`;
+
+            if (result.sources && result.sources.length > 0) {
+                html += '<div class="sources"><h4>📚 相关文档来源:</h4>';
+                result.sources.forEach((source, index) => {
+                    html += `
+                        <div class="source-item">
+                            <div><strong>[${index + 1}]</strong> ${source.content.substring(0, 150)}...</div>
+                            <div class="meta">文件: ${source.metadata.file_name || '未知'}</div>
+                        </div>
+                    `;
+
+                    // 显示相关图片
+                    if (source.images && source.images.length > 0) {
+                        html += '<div class="source-images">';
+                        source.images.forEach(imageUrl => {
+                            html += `
+                                <div class="source-image">
+                                    <img src="${API_BASE}${imageUrl}" alt="相关图片" onclick="window.open('${API_BASE}${imageUrl}', '_blank')">
+                                </div>
+                            `;
+                        });
+                        html += '</div>';
+                    }
+                });
+                html += '</div>';
+            }
+
+            responseArea.innerHTML = html;
+        }
+
+        // 显示消息
+        function showMessage(message, type) {
+            const responseArea = document.getElementById('responseArea');
+            responseArea.innerHTML = `<div class="message ${type}">${message}</div>`;
+            setTimeout(() => {
+                if (responseArea.innerHTML.includes(message)) {
+                    responseArea.innerHTML = '';
+                }
+            }, 5000);
+        }
+
+        // 加载统计信息
+        async function loadStats() {
+            try {
+                const response = await fetch(`${API_BASE}/api/info`);
+                const info = await response.json();
+
+                const statsContent = document.getElementById('statsContent');
+                statsContent.innerHTML = `
+                    <div class="stats-item">
+                        <span class="stats-label">数据库类型</span>
+                        <span class="stats-value">${info.type}</span>
+                    </div>
+                    <div class="stats-item">
+                        <span class="stats-label">集合名称</span>
+                        <span class="stats-value">${info.collection_name}</span>
+                    </div>
+                    <div class="stats-item">
+                        <span class="stats-label">初始化状态</span>
+                        <span class="stats-value">${info.initialized ? '✓' : '✗'}</span>
+                    </div>
+                `;
+            } catch (error) {
+                document.getElementById('statsContent').innerHTML = `
+                    <div style="color: var(--danger);">加载失败</div>
+                `;
+            }
+        }
+
+        // 加载上传历史
+        async function loadHistory() {
+            if (!currentUser) return;
+
+            try {
+                const headers = {};
+                if (currentUser && currentUser.token) {
+                    headers['username'] = currentUser.token;
+                }
+
+                const response = await fetch(`${API_BASE}/api/upload/history`, {
+                    headers: headers
+                });
+
+                const data = await response.json();
+                const historyContent = document.getElementById('historyContent');
+
+                if (data.total === 0) {
+                    historyContent.innerHTML = '<p style="text-align: center; color: var(--gray);">暂无上传记录</p>';
+                    return;
+                }
+
+                let tableHTML = `
+                    <div style="overflow-x: auto;">
+                        <table class="history-table">
+                            <thead>
+                                <tr>
+                                    <th>时间</th>
+                                    <th>用户</th>
+                                    <th>文件名</th>
+                                    <th>大小</th>
+                                    <th>状态</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                `;
+
+                data.records.forEach(record => {
+                    const date = new Date(record.timestamp);
+                    const timeStr = date.toLocaleString('zh-CN');
+                    const sizeMB = (record.file_size / 1024 / 1024).toFixed(2);
+                    const statusStr = record.success ? '✓ 成功' : '✗ 失败';
+                    const statusColor = record.success ? 'color: var(--success);' : 'color: var(--danger);';
+
+                    tableHTML += `
+                        <tr>
+                            <td>${timeStr}</td>
+                            <td>${record.username}</td>
+                            <td>${record.filename}</td>
+                            <td>${sizeMB} MB</td>
+                            <td style="${statusColor}">${statusStr}</td>
+                        </tr>
+                    `;
+                });
+
+                tableHTML += '</tbody></table></div>';
+                historyContent.innerHTML = tableHTML;
+            } catch (error) {
+                document.getElementById('historyContent').innerHTML = `
+                    <div style="color: var(--danger);">加载失败</div>
+                `;
+            }
+        }
+    </script>
+</body>
+</html>
