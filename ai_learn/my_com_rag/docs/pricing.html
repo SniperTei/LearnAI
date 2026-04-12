@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI企业知识库系统 - 定价方案</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 40px 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .header {
+            text-align: center;
+            color: white;
+            margin-bottom: 60px;
+        }
+
+        .header h1 {
+            font-size: 3rem;
+            margin-bottom: 20px;
+            font-weight: 700;
+        }
+
+        .header p {
+            font-size: 1.25rem;
+            opacity: 0.9;
+        }
+
+        .pricing-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 30px;
+            margin-bottom: 60px;
+        }
+
+        .pricing-card {
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            transition: transform 0.3s, box-shadow 0.3s;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .pricing-card:hover {
+            transform: translateY(-10px);
+            box-shadow: 0 30px 80px rgba(0, 0, 0, 0.4);
+        }
+
+        .pricing-card.popular {
+            border: 3px solid #667eea;
+        }
+
+        .pricing-card.popular::before {
+            content: '推荐';
+            position: absolute;
+            top: 20px;
+            right: -30px;
+            background: #667eea;
+            color: white;
+            padding: 5px 40px;
+            transform: rotate(45deg);
+            font-size: 0.9rem;
+            font-weight: 600;
+        }
+
+        .plan-name {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: #333;
+            margin-bottom: 10px;
+        }
+
+        .plan-tagline {
+            color: #666;
+            margin-bottom: 20px;
+            font-size: 0.95rem;
+        }
+
+        .price {
+            font-size: 3.5rem;
+            font-weight: 800;
+            color: #667eea;
+            margin-bottom: 10px;
+        }
+
+        .price-period {
+            color: #999;
+            font-size: 1rem;
+            margin-bottom: 30px;
+        }
+
+        .price-original {
+            text-decoration: line-through;
+            color: #ccc;
+            font-size: 1.5rem;
+        }
+
+        .price-highlight {
+            color: #f59e0b;
+            font-weight: 700;
+            font-size: 2rem;
+        }
+
+        .features {
+            list-style: none;
+            margin-bottom: 30px;
+        }
+
+        .features li {
+            padding: 12px 0;
+            border-bottom: 1px solid #f0f0f0;
+            color: #555;
+            display: flex;
+            align-items: center;
+        }
+
+        .features li:last-child {
+            border-bottom: none;
+        }
+
+        .features li::before {
+            content: '✓';
+            color: #10b981;
+            font-weight: bold;
+            margin-right: 12px;
+            font-size: 1.2rem;
+        }
+
+        .features li.disabled::before {
+            content: '✗';
+            color: #ef4444;
+        }
+
+        .features li.disabled {
+            color: #ccc;
+        }
+
+        .cta-button {
+            width: 100%;
+            padding: 16px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 12px;
+            font-size: 1.1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .cta-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 30px rgba(102, 126, 234, 0.4);
+        }
+
+        .cta-button.secondary {
+            background: white;
+            color: #667eea;
+            border: 2px solid #667eea;
+        }
+
+        .cta-button.secondary:hover {
+            background: #667eea;
+            color: white;
+        }
+
+        .contact-section {
+            background: white;
+            border-radius: 20px;
+            padding: 50px;
+            text-align: center;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        }
+
+        .contact-section h2 {
+            font-size: 2.5rem;
+            color: #333;
+            margin-bottom: 20px;
+        }
+
+        .contact-section p {
+            color: #666;
+            font-size: 1.1rem;
+            margin-bottom: 40px;
+        }
+
+        .contact-info {
+            display: flex;
+            justify-content: center;
+            gap: 40px;
+            flex-wrap: wrap;
+        }
+
+        .contact-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            color: #555;
+            font-size: 1.1rem;
+        }
+
+        .contact-icon {
+            font-size: 1.5rem;
+        }
+
+        .guarantee {
+            background: linear-gradient(135deg, #f59e0b 0%, #ef4444 100%);
+            color: white;
+            padding: 30px;
+            border-radius: 20px;
+            text-align: center;
+            margin-top: 40px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
+        }
+
+        .guarantee h3 {
+            font-size: 1.5rem;
+            margin-bottom: 10px;
+        }
+
+        .guarantee p {
+            opacity: 0.95;
+            font-size: 1rem;
+            line-height: 1.6;
+        }
+
+        @media (max-width: 768px) {
+            .header h1 {
+                font-size: 2rem;
+            }
+
+            .pricing-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .contact-info {
+                flex-direction: column;
+                gap: 20px;
+            }
+        }
+
+        .comparison-table {
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            margin-top: 40px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            overflow-x: auto;
+        }
+
+        .comparison-table h2 {
+            text-align: center;
+            font-size: 2rem;
+            margin-bottom: 30px;
+            color: #333;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th, td {
+            padding: 15px;
+            text-align: left;
+            border-bottom: 1px solid #f0f0f0;
+        }
+
+        th {
+            background: #f9fafb;
+            font-weight: 700;
+            color: #333;
+        }
+
+        th:first-child {
+            border-radius: 10px 0 0 0;
+        }
+
+        .highlight {
+            background: linear-gradient(135deg, #667eea20 0%, #764ba220 100%);
+        }
+
+        .check {
+            color: #10b981;
+            font-size: 1.2rem;
+            font-weight: bold;
+        }
+
+        .cross {
+            color: #ef4444;
+            font-size: 1.2rem;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <h1>选择适合您的方案</h1>
+            <p>透明定价，无隐藏费用。所有方案都包含核心功能。</p>
+        </div>
+
+        <!-- Pricing Cards -->
+        <div class="pricing-grid">
+            <!-- Standard Plan -->
+            <div class="pricing-card">
+                <div class="plan-name">标准版 SaaS</div>
+                <div class="plan-tagline">适合小型团队快速上手</div>
+                <div class="price">$499<span class="price-period">/年</span></div>
+                <ul class="features">
+                    <li>10个用户账号</li>
+                    <li>1000个文档存储</li>
+                    <li>每月1000次查询</li>
+                    <li>多语言支持（中英日韩）</li>
+                    <li>权限管理</li>
+                    <li>在线客服支持</li>
+                    <li>自动系统更新</li>
+                    <li class="disabled">私有化部署</li>
+                    <li class="disabled">定制化UI</li>
+                    <li class="disabled">SSO单点登录</li>
+                </ul>
+                <div style="color: #666; margin-bottom: 20px; font-size: 0.9rem;">
+                    额外用户：$49/人/年
+                </div>
+                <button class="cta-button secondary">开始免费试用</button>
+            </div>
+
+            <!-- Enterprise Plan -->
+            <div class="pricing-card popular">
+                <div class="plan-name">企业定制版</div>
+                <div class="plan-tagline">适合中大型企业</div>
+                <div class="price-original">$5,999起</div>
+                <div class="price-highlight">早鸟价 $2,999起</div>
+                <div class="price-period">一次性 + $299-599/月</div>
+                <ul class="features">
+                    <li>无限用户账号</li>
+                    <li>无限文档存储</li>
+                    <li>无限查询次数</li>
+                    <li>多语言支持（中英日韩）</li>
+                    <li>高级权限管理</li>
+                    <li>私有化部署</li>
+                    <li>定制化UI（logo、品牌色）</li>
+                    <li>SSO单点登录</li>
+                    <li>7x24小时专属支持</li>
+                    <li>定期系统优化</li>
+                    <li>使用培训</li>
+                </ul>
+                <button class="cta-button">预约演示</button>
+            </div>
+
+            <!-- Custom Plan -->
+            <div class="pricing-card">
+                <div class="plan-name">大型企业方案</div>
+                <div class="plan-tagline">量身定制的企业级方案</div>
+                <div class="price">联系销售</div>
+                <div class="price-period">根据需求定制</div>
+                <ul class="features">
+                    <li>所有企业版功能</li>
+                    <li>分布式部署</li>
+                    <li>高可用性集群</li>
+                    <li>定制功能开发</li>
+                    <li>专属技术团队</li>
+                    <li>SLA保障</li>
+                    <li>等保三级认证</li>
+                    <li>私有化模型部署</li>
+                    <li>长期技术支持</li>
+                    <li>联合创新研发</li>
+                </ul>
+                <button class="cta-button secondary">联系销售</button>
+            </div>
+        </div>
+
+        <!-- Comparison Table -->
+        <div class="comparison-table">
+            <h2>方案对比</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>功能特性</th>
+                        <th>标准版</th>
+                        <th class="highlight">企业定制版</th>
+                        <th>大型企业</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>部署方式</td>
+                        <td>云端SaaS</td>
+                        <td class="highlight">云端或私有部署</td>
+                        <td>私有化部署</td>
+                    </tr>
+                    <tr>
+                        <td>用户数量</td>
+                        <td>10人</td>
+                        <td class="highlight">无限</td>
+                        <td>无限</td>
+                    </tr>
+                    <tr>
+                        <td>文档数量</td>
+                        <td>1000个</td>
+                        <td class="highlight">无限</td>
+                        <td>无限</td>
+                    </tr>
+                    <tr>
+                        <td>查询次数</td>
+                        <td>1000次/月</td>
+                        <td class="highlight">无限</td>
+                        <td>无限</td>
+                    </tr>
+                    <tr>
+                        <td>私有化部署</td>
+                        <td><span class="cross">✗</span></td>
+                        <td class="highlight"><span class="check">✓</span></td>
+                        <td><span class="check">✓</span></td>
+                    </tr>
+                    <tr>
+                        <td>定制化UI</td>
+                        <td><span class="cross">✗</span></td>
+                        <td class="highlight"><span class="check">✓</span></td>
+                        <td><span class="check">✓</span></td>
+                    </tr>
+                    <tr>
+                        <td>SSO单点登录</td>
+                        <td><span class="cross">✗</span></td>
+                        <td class="highlight"><span class="check">✓</span></td>
+                        <td><span class="check">✓</span></td>
+                    </tr>
+                    <tr>
+                        <td>API接口</td>
+                        <td><span class="cross">✗</span></td>
+                        <td class="highlight"><span class="check">✓</span></td>
+                        <td><span class="check">✓</span></td>
+                    </tr>
+                    <tr>
+                        <td>实施周期</td>
+                        <td>当天开通</td>
+                        <td class="highlight">2-3周</td>
+                        <td>4-8周</td>
+                    </tr>
+                    <tr>
+                        <td>技术支持</td>
+                        <td>在线客服</td>
+                        <td class="highlight">7x24小时</td>
+                        <td>专属团队</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Guarantee -->
+        <div class="guarantee">
+            <h3>🎁 限时优惠</h3>
+            <p>
+                • 免费POC试用（2周）<br>
+                • 早鸟优惠：首年9折（限本月）<br>
+                • 免费实施咨询<br>
+                • 30天满意度保证
+            </p>
+        </div>
+
+        <!-- Contact Section -->
+        <div class="contact-section">
+            <h2>联系我们</h2>
+            <p>不确定哪个方案适合您？我们的专家团队随时为您提供咨询。</p>
+            <div class="contact-info">
+                <div class="contact-item">
+                    <span class="contact-icon">📞</span>
+                    <span>+86 XXX XXXX XXXX</span>
+                </div>
+                <div class="contact-item">
+                    <span class="contact-icon">✉️</span>
+                    <span>contact@example.com</span>
+                </div>
+                <div class="contact-item">
+                    <span class="contact-icon">💬</span>
+                    <span>微信：[你的微信]</span>
+                </div>
+            </div>
+            <div style="margin-top: 30px;">
+                <button class="cta-button">预约产品演示（30分钟）</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Button click handlers
+        document.querySelectorAll('.cta-button').forEach(button => {
+            button.addEventListener('click', function() {
+                const text = this.textContent;
+                if (text.includes('试用')) {
+                    alert('即将跳转到注册页面...');
+                } else if (text.includes('演示')) {
+                    alert('感谢您的兴趣！请填写以下信息预约演示：\n\n姓名：\n公司：\n职位：\n联系方式：');
+                } else if (text.includes('销售')) {
+                    alert('感谢您的兴趣！我们的销售顾问会尽快联系您。');
+                }
+            });
+        });
+    </script>
+</body>
+</html>
