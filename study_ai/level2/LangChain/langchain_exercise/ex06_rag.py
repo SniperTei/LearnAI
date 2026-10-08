@@ -28,6 +28,8 @@ retriever = vector_store.as_retriever()
 
 format_docs = lambda docs: "\n\n".join(d.page_content for d in docs)   # Document列表→字符串
 
+# 读 → 切 → 量化 → 存 → 查 → 拼
+
 rag_chain = (
     {
         "context": retriever | format_docs,    # 检索→格式化，自动填context
