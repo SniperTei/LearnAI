@@ -1,0 +1,9 @@
+# FoodRAG 依赖（版本 = study_ai 环境实测锁定）
+# 环境外还要跑两个本地服务：Ollama（bge-m3 嵌入 + qwen3:4b 对话）
+
+langchain-core==1.6.10
+langchain-chroma==1.1.0
+langchain-ollama==1.1.0
+
+# 可选：ask.py 的 PROVIDER 切到 "dashscope" 时才需要
+langchain-openai==1.6.6
