@@ -24,7 +24,7 @@ from pathlib import Path
 
 from langchain_core.documents import Document
 
-DATA_DIR = Path(__file__).parent / "data"
+DATA_DIR = Path(__file__).resolve().parents[1] / "data"  # prep/ 的上一层才是项目根
 MENU_JSON = DATA_DIR / "jinyan_menu.json"
 OUT_JSONL = DATA_DIR / "menu_chunks.jsonl"
 
