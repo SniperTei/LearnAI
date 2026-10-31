@@ -22,7 +22,8 @@ import re
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_ollama import ChatOllama
 
-from search import DB_CONFIG, build_filter, get_store, resolve_db
+from router import DB_CONFIG, resolve_db
+from search import build_filter, get_store
 
 # ==== 切换开关：ollama / dashscope ====
 PROVIDER = "ollama"
