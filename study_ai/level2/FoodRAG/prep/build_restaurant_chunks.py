@@ -43,6 +43,7 @@ def build_chunks() -> list[Document]:
 
         body_lines = [
             f"{display_name} {shop['品类']} {shop['商圈']} {shop['适合场景']}",  # 暗桩前缀
+            f"人均：{shop['人均']}元",  # 人均必须进正文：metadata 只给过滤，LLM 只看得见正文
             f"招牌菜：{shop['招牌菜']}" if shop["招牌菜"] else None,
             f"特点评价：{shop['特点评价']}" if shop["特点评价"] else None,
             f"避雷点：{shop['避雷点']}" if shop["避雷点"] else None,
