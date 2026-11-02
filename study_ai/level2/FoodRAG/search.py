@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import time
 
 from langchain_chroma import Chroma
 from langchain_ollama import OllamaEmbeddings
@@ -53,12 +54,16 @@ def search(question: str, db: str | None = None, type_filter: str | None = None,
     print(f"filter: {json.dumps(dish_filter, ensure_ascii=False) if dish_filter else '无'}")
     print("-" * 50)
 
+    # ---- 计时：只量检索本身（perf_counter 单调钟，专管测耗时）----
+    t0 = time.perf_counter()
     results = get_store(db).similarity_search_with_relevance_scores(
         question, k=k, filter=dish_filter
     )
+    elapsed = time.perf_counter() - t0
     if not results:
         print("0 命中！检查 filter 条件。")
         return
+    print(f"耗时: {elapsed:.3f}秒（向量检索 {len(results)} 块）")
     label_key = DB_CONFIG[db]["label_key"]
     for doc, score in results:
         meta = doc.metadata

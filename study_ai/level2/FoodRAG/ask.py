@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import os
 import re
+import time
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_ollama import ChatOllama
@@ -58,9 +59,11 @@ def ask(question: str, k: int = 3) -> None:
     # ---- 路由 + 查：复用 search.py 的判单树 ----
     db, reason = resolve_db(question)
     dish_filter = build_filter(question, db, type_filter=None)
+    t0 = time.perf_counter()
     docs = get_store(db).similarity_search_with_relevance_scores(
         question, k=k, filter=dish_filter
     )
+    retrieve_sec = time.perf_counter() - t0
     if not docs:
         print("没检索到任何证据，无法回答。")
         return
@@ -73,6 +76,7 @@ def ask(question: str, k: int = 3) -> None:
     # ---- trace：先看路由和证据，再看答案 ----
     print(f"仓库: {db}（{reason}）")
     print(f"证据: {[doc.metadata[label_key] for doc, _ in docs]}")
+    print(f"检索耗时: {retrieve_sec:.3f}秒")
     print("=" * 50)
 
     # ---- 拼：受控生成 ----
@@ -81,7 +85,9 @@ def ask(question: str, k: int = 3) -> None:
         SystemMessage(content=SYSTEM_PROMPT),
         HumanMessage(content=f"问题：{question}\n\n证据：\n{evidence}"),
     ]
+    t0 = time.perf_counter()
     answer = _clean(llm.invoke(messages).content)
+    print(f"生成耗时: {time.perf_counter() - t0:.3f}秒")
     print(answer)
 
 
