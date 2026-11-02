@@ -23,7 +23,7 @@ EMBEDDINGS = OllamaEmbeddings(model="bge-m3")
 
 
 def build_filter(question: str, db: str, type_filter: str | None, max_price: int | None = None,
-                 difficulty: str | None = None) -> dict | None:
+                 difficulty: str | list[str] | None = None) -> dict | None:
     """过滤卡：片子拼装——名字片/类型片/价格片/难度片，单片不包壳、多片包 $and
     （拼装规矩学 drug_rag build_metadata_filter，第3关验证过：单片直接用，多片才包壳）。
 
@@ -47,7 +47,8 @@ def build_filter(question: str, db: str, type_filter: str | None, max_price: int
     if max_price is not None and db == "restaurant":
         pieces.append({"人均": {"$lte": max_price}})
     if difficulty is not None and db == "menu":
-        pieces.append({"难度": difficulty})
+        # 难度可以是单值("简单")或多值(["费工夫","一般"]——人多混搭凑桌，$in 同店名多命中)
+        pieces.append({"难度": {"$in": difficulty} if isinstance(difficulty, list) else difficulty})
 
     if not pieces:
         return None

@@ -34,7 +34,7 @@ SYSTEM_PROMPT = """你是金燕美食助手，负责回答做菜问题和饭店�
 1. 只能依据下面提供的证据回答，证据里没有的信息就明说"资料里没有"，不要编造。
 2. 做菜问题给出关键步骤和注意点；饭店问题给出店名、人均、地址等关键信息。
 3. 涉及多家店/多道菜时逐家列出，不要混在一起。
-4. 回答末尾单独一行写"来源：xxx"，只写证据里实际出现的店名或菜名。"""
+（来源行不用你写，程序会根据实际检索到的证据自动盖章。）"""
 
 
 def build_llm():
@@ -86,13 +86,15 @@ def _ask(prompt: str) -> str:
         return ""
 
 
-def clarify(question: str) -> tuple[str, str, str | None, int | None]:
+def clarify(question: str) -> tuple[str, str, str | list | None, int | None]:
     """槽位补全：只在判单树落到兜底（啥信号都没有）时由 ask() 调用。
 
     周一~四  → 默认在家吃（menu），不问（用户作息：工作日晚饭在家）
-    周五六日 → 问①在家/出去；在家再问②两人/请朋友
+    周五六日 → 问①在家/出去；在家再问②两人/请朋友；请朋友再问③几位
+        ≤4人：纯硬菜局（难度=费工夫，k=5）
+        >4人：硬菜不够凑一桌 → 放宽"费工夫+一般"混搭，k=人数+2（上限8）
     问题里明确说了"在家吃/出去吃"的，判单树场景词分支早接走了，到不了这。
-    返回 (db, reason, 难度片, 建议k)。
+    返回 (db, reason, 难度片[str或list], 建议k)。
     """
     wd, day_desc = _target_weekday(question)
     if wd not in ASK_WEEKDAYS:
@@ -103,14 +105,24 @@ def clarify(question: str) -> tuple[str, str, str | None, int | None]:
         return "restaurant", f"{day_desc}·槽位补全：出去吃", None, None
 
     ans2 = _ask("在家吃呀。就夫妻两人，还是请朋友来？")
-    if any(w in ans2 for w in ["朋友", "请客", "聚餐", "客"]):
-        # 请朋友=凑一桌硬菜：难度片费工夫 + 多取几块证据
-        return "menu", f"{day_desc}·槽位补全：在家请朋友（硬菜局）", "费工夫", 5
-    return "menu", f"{day_desc}·槽位补全：在家两人餐", None, None
+    if not any(w in ans2 for w in ["朋友", "请客", "聚餐", "客"]):
+        return "menu", f"{day_desc}·槽位补全：在家两人餐", None, None
+
+    ans3 = _ask("好嘞，一共几位一起吃？")
+    m = re.search(r"\d+", ans3)
+    if m:
+        guests = int(m.group(0))
+    else:  # 中文数字兜底（"六个人""两位"）
+        cn = {"两": 2, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
+        guests = next((v for ch, v in cn.items() if ch in ans3), 4)  # 没数字按小局4人
+    if guests > 4:
+        return ("menu", f"{day_desc}·槽位补全：请朋友{guests}人（硬菜+一般混搭）",
+                ["费工夫", "一般"], min(guests + 2, 8))
+    return "menu", f"{day_desc}·槽位补全：请朋友{guests}人（硬菜局）", "费工夫", 5
 
 
 def ask(question: str, k: int = 3, max_price: int | None = None,
-        difficulty: str | None = None) -> None:
+        difficulty: str | list[str] | None = None) -> None:
     # ---- 路由 + 查：复用 search.py 的判单树 ----
     db, reason = resolve_db(question)
 
@@ -155,14 +167,32 @@ def ask(question: str, k: int = 3, max_price: int | None = None,
     print(f"生成耗时: {time.perf_counter() - t0:.3f}秒")
     print(answer)
 
+    # ---- 来源盖章：检索层已知的信息不让 LLM 抄——确定性的事交给代码 ----
+    # 名字从 metadata 现取（菜名/展示名），保序去重防同名连锁重复
+    labels = list(dict.fromkeys(doc.metadata[label_key] for doc, _ in docs))
+    print(f"\n来源：{'、'.join(labels)}")
+
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="金燕美食问答（自动选仓）")
-    parser.add_argument("question", help="想问什么")
+    parser = argparse.ArgumentParser(description="金燕美食问答（不带问题进入对话模式）")
+    parser.add_argument("question", nargs="?", default=None, help="想问什么（不填进入对话模式）")
     parser.add_argument("--k", type=int, default=3, help="取几块证据（默认3）")
     parser.add_argument("--max-price", type=int, default=None,
                         help="人均上限（如 --max-price 50 → 人均≤50，仅饭店仓生效）")
     parser.add_argument("--difficulty", choices=["简单", "一般", "费工夫"], default=None,
                         help="按难度过滤（仅菜品仓生效）")
     args = parser.parse_args()
-    ask(args.question, k=args.k, max_price=args.max_price, difficulty=args.difficulty)
+
+    if args.question:  # 带问题 = 一次性问答（脚本/调试用，行为不变）
+        ask(args.question, k=args.k, max_price=args.max_price, difficulty=args.difficulty)
+    else:  # 不带问题 = 对话模式：一直聊到回车退出
+        print("金燕美食助手已上线，直接开问（直接回车退出）")
+        while True:
+            try:
+                q = input("\n问点什么> ").strip()
+            except EOFError:
+                break
+            if not q:
+                print("慢用，回见。")
+                break
+            ask(q, k=args.k, max_price=args.max_price, difficulty=args.difficulty)
