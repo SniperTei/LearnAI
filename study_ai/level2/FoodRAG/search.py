@@ -16,22 +16,27 @@ import time
 from langchain_chroma import Chroma
 from langchain_ollama import OllamaEmbeddings
 
-from router import CHROMA_DIR, DB_CONFIG, extract_max_price, load_rows, match_names, resolve_db
+from router import (CHROMA_DIR, DB_CONFIG, extract_difficulty, extract_max_price,
+                    load_rows, match_names, resolve_db)
 
 EMBEDDINGS = OllamaEmbeddings(model="bge-m3")
 
 
-def build_filter(question: str, db: str, type_filter: str | None, max_price: int | None = None) -> dict | None:
-    """过滤卡：片子拼装——名字片/类型片/价格片，单片不包壳、多片包 $and
+def build_filter(question: str, db: str, type_filter: str | None, max_price: int | None = None,
+                 difficulty: str | None = None) -> dict | None:
+    """过滤卡：片子拼装——名字片/类型片/价格片/难度片，单片不包壳、多片包 $and
     （拼装规矩学 drug_rag build_metadata_filter，第3关验证过：单片直接用，多片才包壳）。
 
-    价格片两条来路：--max-price 手动指定优先，没传就从问题里自动提取
-    （"人均50以内"→50）。只给饭店仓加：菜品仓 metadata 没有"人均"字段，
-    加了必 0 命中。
+    价格片/难度片各有两条来路：CLI 手动指定优先，没传就从问题里自动提取
+    （"人均50以内"→价格片，"来个简单的"→难度片）。各守各的仓：
+    价格片只给饭店仓（菜品仓没人均字段），难度片只给菜品仓（饭店仓没难度字段）——
+    串仓加片必 0 命中。
     """
     cfg = DB_CONFIG[db]
     if max_price is None:
         max_price = extract_max_price(question)
+    if difficulty is None:
+        difficulty = extract_difficulty(question)
 
     pieces: list[dict] = []
     hits = match_names(question, [r["metadata"][cfg["name_key"]] for r in load_rows(db)])
@@ -41,6 +46,8 @@ def build_filter(question: str, db: str, type_filter: str | None, max_price: int
         pieces.append({cfg["type_key"]: type_filter})
     if max_price is not None and db == "restaurant":
         pieces.append({"人均": {"$lte": max_price}})
+    if difficulty is not None and db == "menu":
+        pieces.append({"难度": difficulty})
 
     if not pieces:
         return None
@@ -56,13 +63,13 @@ def get_store(db: str) -> Chroma:
 
 
 def search(question: str, db: str | None = None, type_filter: str | None = None,
-           k: int = 3, max_price: int | None = None) -> None:
+           k: int = 3, max_price: int | None = None, difficulty: str | None = None) -> None:
     # ---- 路由：--db 手动指定优先（调试后门），否则走判单树 ----
     if db is None:
         db, reason = resolve_db(question)
     else:
         reason = "手动指定 --db"
-    dish_filter = build_filter(question, db, type_filter, max_price=max_price)
+    dish_filter = build_filter(question, db, type_filter, max_price=max_price, difficulty=difficulty)
 
     # ---- trace 打印（监控录像：路由→filter→战果）----
     print(f"问题: {question}")
@@ -97,5 +104,8 @@ if __name__ == "__main__":
     parser.add_argument("--k", type=int, default=3)
     parser.add_argument("--max-price", type=int, default=None,
                         help="人均上限（如 --max-price 50 → 人均≤50，仅饭店仓生效）")
+    parser.add_argument("--difficulty", choices=["简单", "一般", "费工夫"], default=None,
+                        help="按难度过滤（仅菜品仓生效）")
     args = parser.parse_args()
-    search(args.question, db=args.db, type_filter=args.type, k=args.k, max_price=args.max_price)
+    search(args.question, db=args.db, type_filter=args.type, k=args.k,
+           max_price=args.max_price, difficulty=args.difficulty)

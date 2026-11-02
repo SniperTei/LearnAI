@@ -55,10 +55,12 @@ def _clean(text: str) -> str:
     return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
 
 
-def ask(question: str, k: int = 3, max_price: int | None = None) -> None:
+def ask(question: str, k: int = 3, max_price: int | None = None,
+        difficulty: str | None = None) -> None:
     # ---- 路由 + 查：复用 search.py 的判单树 ----
     db, reason = resolve_db(question)
-    dish_filter = build_filter(question, db, type_filter=None, max_price=max_price)
+    dish_filter = build_filter(question, db, type_filter=None, max_price=max_price,
+                               difficulty=difficulty)
     t0 = time.perf_counter()
     docs = get_store(db).similarity_search_with_relevance_scores(
         question, k=k, filter=dish_filter
@@ -97,5 +99,7 @@ if __name__ == "__main__":
     parser.add_argument("--k", type=int, default=3, help="取几块证据（默认3）")
     parser.add_argument("--max-price", type=int, default=None,
                         help="人均上限（如 --max-price 50 → 人均≤50，仅饭店仓生效）")
+    parser.add_argument("--difficulty", choices=["简单", "一般", "费工夫"], default=None,
+                        help="按难度过滤（仅菜品仓生效）")
     args = parser.parse_args()
-    ask(args.question, k=args.k, max_price=args.max_price)
+    ask(args.question, k=args.k, max_price=args.max_price, difficulty=args.difficulty)

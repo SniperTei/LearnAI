@@ -92,6 +92,23 @@ def extract_max_price(question: str) -> int | None:
     return None
 
 
+# 难度词表：想要"做起来简单"→过滤难度=简单；点名要硬菜→费工夫。
+# 和场景词表同一个命门：没写的说法不触发（"不费劲"就没写，漏网再补）。
+DIFFICULTY_WORDS = {
+    "简单": ["简单", "快手", "省事", "省时间", "方便", "容易"],
+    "费工夫": ["费工夫", "费时间", "复杂", "硬菜"],
+}
+
+
+def extract_difficulty(question: str) -> str | None:
+    """从问题里挖难度偏好（"工作日晚餐来个简单的" → 简单）。"""
+    q = normalize(question)
+    for level, words in DIFFICULTY_WORDS.items():
+        if any(w in q for w in words):
+            return level
+    return None
+
+
 def resolve_db(question: str) -> tuple[str, str]:
     """选仓判单树：返回 (仓库名, 路由理由)——理由进 trace，路由不黑盒。"""
     shop_hits = match_names(question, [r["metadata"]["店名"] for r in load_rows("restaurant")])

@@ -38,10 +38,12 @@ def build_chunks() -> list[Document]:
         name = str(dish.get("菜名", "")).strip()
         dish_type = str(dish.get("菜的类型", "")).strip()
         taste = str(dish.get("口味", "")).strip()
+        # 难度：账本没标的默认"一般"（填账时只标两头，中间自动落默认）
+        difficulty = str(dish.get("难度", "")).strip() or "一般"
 
         # 正文 = 暗桩前缀 + 各字段正文
         body_lines = [
-            f"{name} {dish_type} {taste}",  # 暗桩：让"清淡/荤菜"这类词也进正文
+            f"{name} {dish_type} {taste} {difficulty}",  # 暗桩：让"清淡/荤菜/简单"这类词也进正文
             f"食材：{dish.get('食材', '')}",
             f"调料：{dish.get('调料', '')}",
             f"做法：{dish.get('菜的做法', '')}",
@@ -60,6 +62,7 @@ def build_chunks() -> list[Document]:
                     "菜名": name,
                     "类型": dish_type,
                     "口味": taste,
+                    "难度": difficulty,  # 简单/一般/费工夫——给"工作日晚餐来个简单的"这类过滤
                     "厨师": str(dish.get("厨师", "")).strip(),
                     "图片": str(dish.get("菜的图片路径", "")).strip(),
                 },
