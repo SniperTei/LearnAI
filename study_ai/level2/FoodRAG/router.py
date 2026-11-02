@@ -23,6 +23,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 DATA_DIR = Path(__file__).parent / "data"
@@ -30,8 +31,8 @@ CHROMA_DIR = DATA_DIR / "chroma"
 
 # 场景词表（用户原创词表 + 少量补充；"加班/工作餐"=10-31实战补词：
 # "明天加班中午吃什么"漏到兜底走错仓，用户点名加班该找饭店工作餐）
-SCENE_RESTAURANT_WORDS = ["外食", "出去吃", "在哪吃", "哪里吃", "哪家店", "下馆子", "饭店",
-                          "加班", "工作餐", "工作日午餐"]
+SCENE_RESTAURANT_WORDS = ["外食", "出去吃", "在哪吃", "哪里吃", "去哪吃", "哪家店", "下馆子",
+                          "饭店", "加班", "工作餐", "工作日午餐", "人均"]  # "人均"是饭店词汇，出现即外食信号
 SCENE_MENU_WORDS = ["家饭", "在家吃", "自己做", "家常"]
 
 # 两仓地图：谁叫什么集合、账本在哪、名字/标签字段叫什么
@@ -66,6 +67,29 @@ def match_names(question: str, names: list[str]) -> list[str]:
             seen.add(name)
             hits.append(name)
     return hits
+
+
+# 价格说法模式表：命中任意一个，捕获组里的数字就是价格上限。
+# 只认"以内/以下/不超过"这类明确上界说法——"人均50左右"是模糊词，不硬猜（宁漏勿错）。
+PRICE_PATTERNS = [
+    r"人均(\d+)(?:元|块)?(?:以内|之内|以下)",   # 人均50以内 / 人均50元以内
+    r"(\d+)(?:元|块)(?:以内|之内|以下)",         # 50元以内 / 50块以内
+    r"不超过(\d+)(?:元|块)?",                   # 不超过50 / 不超过50元
+]
+
+
+def extract_max_price(question: str) -> int | None:
+    """从问题里挖价格上限（迷你版 drug_rag resolve_query_constraints 的数值片）。
+
+    人均在 metadata 里存的是 int——备菜线当初就为今天这步铺的路，
+    现在才能用 Chroma 的 $lte 数值比较（字符串只能等值匹配）。
+    """
+    q = normalize(question)
+    for pattern in PRICE_PATTERNS:
+        m = re.search(pattern, q)
+        if m:
+            return int(m.group(1))
+    return None
 
 
 def resolve_db(question: str) -> tuple[str, str]:
