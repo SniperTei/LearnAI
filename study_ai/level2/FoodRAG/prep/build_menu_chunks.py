@@ -63,6 +63,7 @@ def build_chunks() -> list[Document]:
                     "类型": dish_type,
                     "口味": taste,
                     "难度": difficulty,  # 简单/一般/费工夫——给"工作日晚餐来个简单的"这类过滤
+                    "别名": str(dish.get("别名", "")).strip(),  # 顿号分隔："孜然牛肉"——锁菜认口语叫法
                     "厨师": str(dish.get("厨师", "")).strip(),
                     "图片": str(dish.get("菜的图片路径", "")).strip(),
                 },

@@ -17,7 +17,7 @@ from langchain_chroma import Chroma
 from langchain_ollama import OllamaEmbeddings
 
 from router import (CHROMA_DIR, DB_CONFIG, extract_difficulty, extract_max_price,
-                    load_rows, match_names, resolve_db)
+                    match_db_names, resolve_db)
 
 EMBEDDINGS = OllamaEmbeddings(model="bge-m3")
 
@@ -39,7 +39,7 @@ def build_filter(question: str, db: str, type_filter: str | None, max_price: int
         difficulty = extract_difficulty(question)
 
     pieces: list[dict] = []
-    hits = match_names(question, [r["metadata"][cfg["name_key"]] for r in load_rows(db)])
+    hits = match_db_names(question, db)  # 正式名/别名都认，命中归一成正式名
     if hits:
         pieces.append({cfg["name_key"]: hits[0] if len(hits) == 1 else {"$in": hits}})
     if type_filter:

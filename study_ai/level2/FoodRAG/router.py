@@ -38,7 +38,7 @@ SCENE_MENU_WORDS = ["家饭", "在家吃", "自己做", "家常"]
 # 两仓地图：谁叫什么集合、账本在哪、名字/标签字段叫什么
 DB_CONFIG = {
     "menu": {"collection": "menu_chunks", "jsonl": DATA_DIR / "menu_chunks.jsonl",
-             "name_key": "菜名", "label_key": "菜名", "type_key": "类型"},
+             "name_key": "菜名", "label_key": "菜名", "type_key": "类型", "alias_key": "别名"},
     "restaurant": {"collection": "restaurant_chunks", "jsonl": DATA_DIR / "restaurant_chunks.jsonl",
                    "name_key": "店名", "label_key": "展示名", "type_key": "品类"},
 }
@@ -67,6 +67,25 @@ def match_names(question: str, names: list[str]) -> list[str]:
             seen.add(name)
             hits.append(name)
     return hits
+
+
+def match_db_names(question: str, db: str) -> list[str]:
+    """带别名的名字匹配：正式名/别名都算命中，命中后归一成正式名。
+
+    "孜然牛肉怎么做" → 命中别名"孜然牛肉" → 归一成正式菜名"孜盐牛肉"。
+    别名从账本 metadata 的别名字段现拉（顿号/逗号分隔），账本加新别名自动生效。
+    """
+    cfg = DB_CONFIG[db]
+    alias_map: dict[str, str] = {}
+    for r in load_rows(db):
+        canonical = r["metadata"][cfg["name_key"]]
+        alias_map.setdefault(canonical, canonical)
+        raw = str(r["metadata"].get(cfg.get("alias_key", ""), "") or "")
+        for alias in re.split(r"[、，,]", raw):
+            if alias := alias.strip():
+                alias_map.setdefault(alias, canonical)
+    hits = match_names(question, list(alias_map))
+    return list(dict.fromkeys(alias_map[h] for h in hits))  # 多别名同主→归一后去重
 
 
 # 价格说法模式表：命中任意一个，捕获组里的数字就是价格上限。
@@ -114,7 +133,7 @@ def resolve_db(question: str) -> tuple[str, str]:
     shop_hits = match_names(question, [r["metadata"]["店名"] for r in load_rows("restaurant")])
     if shop_hits:
         return "restaurant", f"命中店名: {shop_hits}"
-    dish_hits = match_names(question, [r["metadata"]["菜名"] for r in load_rows("menu")])
+    dish_hits = match_db_names(question, "menu")
     if dish_hits:
         return "menu", f"命中菜名: {dish_hits}"
     q = normalize(question)
