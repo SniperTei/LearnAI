@@ -11,6 +11,11 @@
 
 LLM 可切换：PROVIDER 改成 "dashscope" 即换供应商。
 qwen3:4b 是思考模型，可能吐 <think> 段——剥掉再给用户看。
+
+对话历史（学 langchain 第7关记忆三件套的手动版）：
+    对话模式记最近 2 轮（问题, 答案），拼 prompt 时插在系统提示词和新问题中间
+    （Human/AI 成对 = 手动版 MessagesPlaceholder）。只喂生成层，检索词仍是当前问题——
+    省略式追问（"它怎么做"）靠历史能听懂，但检索层锁定还要靠将来的历史改写。
 """
 
 from __future__ import annotations
@@ -21,10 +26,10 @@ import os
 import re
 import time
 
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_ollama import ChatOllama
 
-from router import DB_CONFIG, load_rows, match_areas, normalize, resolve_db
+from router import DB_CONFIG, load_rows, match_areas, match_db_names, normalize, resolve_db
 from search import build_filter, get_store
 
 # ==== 切换开关：ollama / dashscope ====
@@ -121,10 +126,29 @@ def clarify(question: str) -> tuple[str, str, str | list | None, int | None]:
     return "menu", f"{day_desc}·槽位补全：请朋友{guests}人（硬菜局）", "费工夫", 5
 
 
+# 追问标志词：问题里出现这些词才算"接着上文问"，才允许历史带锁。
+# 防的是换话题误伤："推荐个简单的菜"没这些词→新话题，不带锁；
+# 已知误伤："其他"含"它"（"有其他的吗"会被当成追问）——词表命门，漏网再补。
+FOLLOWUP_MARKERS = ["它", "这道", "这个", "这家", "那道", "那个", "那家", "刚才", "前面", "上面", "第二"]
+
+
 def ask(question: str, k: int = 3, max_price: int | None = None,
-        difficulty: str | list[str] | None = None) -> None:
+        difficulty: str | list[str] | None = None,
+        history: list[dict] | None = None) -> tuple[str, str | None] | None:
+    """问一轮。history = [{"question":…, "answer":…, "lock":…}, …]（最近 2 轮）。
+    返回 (答案文本, 本轮锁定的名字)；没检索到/没搜到返回 None（不进历史）。"""
     # ---- 路由 + 查：复用 search.py 的判单树 ----
     db, reason = resolve_db(question)
+
+    # ---- 历史带锁（迷你版 query_rewriter）：追问没信号 → 借上一轮锁定的名字拼检索词 ----
+    # 学 drug_rag 分工：改写词（rewritten_query）归检索，原问题（question）归生成。
+    # 只有"兜底+有历史+上轮锁过名+问题像追问"四条全中才带——换话题不被旧名字绑架。
+    q_retrieval = question
+    if (reason.startswith("兜底") and history and history[-1].get("lock")
+            and any(m in question for m in FOLLOWUP_MARKERS)):
+        q_retrieval = f"{history[-1]['lock']} {question}"
+        db, reason = resolve_db(q_retrieval)
+        reason += "·历史带锁"
 
     # ---- 外卖地址槽：没带位置就反问，认不出商圈直接如实说"没搜到" ----
     # （宁可没有，不推错的——账本里没收录的位置，推别片的店就是事故）
@@ -139,7 +163,7 @@ def ask(question: str, k: int = 3, max_price: int | None = None,
                                     if r["metadata"].get("商圈")})
                 print(f"没搜索到「{ans or '（未作答）'}」附近收录的店。"
                       f"目前账本里的商圈：{'、'.join(all_areas)}")
-                return
+                return None
         reason += f"·址槽:{area}"
 
     # ---- 槽位补全：判单树落到兜底（无任何信号）才启动，按日子补默认或反问 ----
@@ -150,16 +174,18 @@ def ask(question: str, k: int = 3, max_price: int | None = None,
         if slot_k:
             k = max(k, slot_k)  # 请朋友凑一桌，多取几块证据
 
-    dish_filter = build_filter(question, db, type_filter=None, max_price=max_price,
+    # 本轮锁定的名字记进历史，供下一轮追问带锁（"锅包肉怎么做"→lock=锅包肉）
+    lock = " ".join(match_db_names(q_retrieval, db)) or None
+    dish_filter = build_filter(q_retrieval, db, type_filter=None, max_price=max_price,
                                difficulty=difficulty, area=area)
     t0 = time.perf_counter()
     docs = get_store(db).similarity_search_with_relevance_scores(
-        question, k=k, filter=dish_filter
+        q_retrieval, k=k, filter=dish_filter
     )
     retrieve_sec = time.perf_counter() - t0
     if not docs:
         print("没检索到任何证据，无法回答。")
-        return
+        return None
 
     label_key = DB_CONFIG[db]["label_key"]
     evidence = "\n\n".join(
@@ -176,20 +202,27 @@ def ask(question: str, k: int = 3, max_price: int | None = None,
     t0 = time.perf_counter()
     try:
         llm = build_llm()  # 构建也可能炸（如 dashscope 模式没配 key），一并圈进保险杠
-        messages = [
-            SystemMessage(content=SYSTEM_PROMPT),
-            HumanMessage(content=f"问题：{question}\n\n证据：\n{evidence}"),
-        ]
+        # 历史插在系统提示词和新问题中间：Human/AI 成对 = 手动版 MessagesPlaceholder。
+        # 只带最近 2 轮——qwen3:4b 本地又慢又小，历史塞多了纯属拖累。
+        messages = [SystemMessage(content=SYSTEM_PROMPT)]
+        for turn in (history or [])[-2:]:
+            messages.append(HumanMessage(content=turn["question"]))
+            messages.append(AIMessage(content=turn["answer"]))
+        messages.append(HumanMessage(content=f"问题：{question}\n\n证据：\n{evidence}"))
         answer = _clean(llm.invoke(messages).content)
         print(f"生成耗时: {time.perf_counter() - t0:.3f}秒")
         print(answer)
+        return answer, lock
     except Exception as exc:
         # 学 drug_rag _controlled_llm_answer 的 except 分支：Ollama 没开/key 失效/模型404
         # 都走这里——检索已经成功，证据直接上桌，用户至少看得到菜谱
         print(f"生成层提示：LLM 不可用（{type(exc).__name__}），已退回抽取式兜底答案。")
+        fallback_lines = []
         for i, (doc, _) in enumerate(docs, start=1):
+            fallback_lines.append(f"【证据{i}】{doc.metadata[label_key]}\n{doc.page_content}")
             print(f"\n【证据{i}】{doc.metadata[label_key]}")
             print(doc.page_content)
+        return "\n".join(fallback_lines), lock
 
     # ---- 来源盖章：检索层已知的信息不让 LLM 抄——确定性的事交给代码 ----
     # 名字从 metadata 现取（菜名/展示名），保序去重防同名连锁重复
@@ -211,6 +244,7 @@ if __name__ == "__main__":
         ask(args.question, k=args.k, max_price=args.max_price, difficulty=args.difficulty)
     else:  # 不带问题 = 对话模式：一直聊到回车退出
         print("金燕美食助手已上线，直接开问（直接回车退出）")
+        history: list[dict] = []  # 记忆仓库：最近 2 轮（问, 答）
         while True:
             try:
                 q = input("\n问点什么> ").strip()
@@ -219,4 +253,9 @@ if __name__ == "__main__":
             if not q:
                 print("慢用，回见。")
                 break
-            ask(q, k=args.k, max_price=args.max_price, difficulty=args.difficulty)
+            result = ask(q, k=args.k, max_price=args.max_price,
+                         difficulty=args.difficulty, history=history)
+            if result:  # 没检索到/没搜到的轮次不进历史（记了也是脏账）
+                answer, lock = result
+                history.append({"question": q, "answer": answer, "lock": lock})
+                del history[:-2]  # 只留最近 2 轮，金鱼记忆防撑爆小模型
