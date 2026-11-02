@@ -16,6 +16,7 @@ qwen3:4b 是思考模型，可能吐 <think> 段——剥掉再给用户看。
 from __future__ import annotations
 
 import argparse
+import datetime
 import os
 import re
 import time
@@ -23,7 +24,7 @@ import time
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_ollama import ChatOllama
 
-from router import DB_CONFIG, resolve_db
+from router import DB_CONFIG, normalize, resolve_db
 from search import build_filter, get_store
 
 # ==== 切换开关：ollama / dashscope ====
@@ -55,10 +56,72 @@ def _clean(text: str) -> str:
     return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
 
 
+# ==== 槽位补全（学 AdvRAG_v2 例5）：缺的槽不瞎猜，反问补齐 ====
+
+# 周五六日落这组就先问再定（周五可能犒劳自己也可能出去，用户定的规矩）
+ASK_WEEKDAYS = {4, 5, 6}  # weekday(): 周一=0 … 周日=6
+WEEKDAY_NAMES = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
+
+
+def _target_weekday(question: str) -> tuple[int, str]:
+    """问题里说没说日子：周末/周X/明天 优先，没提就当"今天"。"""
+    q = normalize(question)
+    today = datetime.date.today()
+    if "周末" in q:
+        return 5, "周末"  # 当周六处理（周六周日反正都要问）
+    for i, name in enumerate(WEEKDAY_NAMES):
+        if name in q:
+            return i, name
+    if "明天" in q:
+        d = today + datetime.timedelta(days=1)
+        return d.weekday(), "明天"
+    return today.weekday(), "今天"
+
+
+def _ask(prompt: str) -> str:
+    """反问一轮；管道/非交互环境 EOF 不炸，返回空串走默认。"""
+    try:
+        return input(f"{prompt} ").strip()
+    except EOFError:
+        return ""
+
+
+def clarify(question: str) -> tuple[str, str, str | None, int | None]:
+    """槽位补全：只在判单树落到兜底（啥信号都没有）时由 ask() 调用。
+
+    周一~四  → 默认在家吃（menu），不问（用户作息：工作日晚饭在家）
+    周五六日 → 问①在家/出去；在家再问②两人/请朋友
+    问题里明确说了"在家吃/出去吃"的，判单树场景词分支早接走了，到不了这。
+    返回 (db, reason, 难度片, 建议k)。
+    """
+    wd, day_desc = _target_weekday(question)
+    if wd not in ASK_WEEKDAYS:
+        return "menu", f"{day_desc}·默认在家吃（周一~周四）", None, None
+
+    ans = _ask(f"（{day_desc}）在家吃还是出去吃？")
+    if any(w in ans for w in ["出去", "外食", "下馆子", "饭店", "店"]):
+        return "restaurant", f"{day_desc}·槽位补全：出去吃", None, None
+
+    ans2 = _ask("在家吃呀。就夫妻两人，还是请朋友来？")
+    if any(w in ans2 for w in ["朋友", "请客", "聚餐", "客"]):
+        # 请朋友=凑一桌硬菜：难度片费工夫 + 多取几块证据
+        return "menu", f"{day_desc}·槽位补全：在家请朋友（硬菜局）", "费工夫", 5
+    return "menu", f"{day_desc}·槽位补全：在家两人餐", None, None
+
+
 def ask(question: str, k: int = 3, max_price: int | None = None,
         difficulty: str | None = None) -> None:
     # ---- 路由 + 查：复用 search.py 的判单树 ----
     db, reason = resolve_db(question)
+
+    # ---- 槽位补全：判单树落到兜底（无任何信号）才启动，按日子补默认或反问 ----
+    if reason.startswith("兜底"):
+        db, reason, slot_difficulty, slot_k = clarify(question)
+        if slot_difficulty and difficulty is None:
+            difficulty = slot_difficulty  # 反问挖出的难度档（CLI --difficulty 仍最高优先）
+        if slot_k:
+            k = max(k, slot_k)  # 请朋友凑一桌，多取几块证据
+
     dish_filter = build_filter(question, db, type_filter=None, max_price=max_price,
                                difficulty=difficulty)
     t0 = time.perf_counter()
