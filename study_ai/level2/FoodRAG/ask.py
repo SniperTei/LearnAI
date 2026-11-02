@@ -156,16 +156,24 @@ def ask(question: str, k: int = 3, max_price: int | None = None,
     print(f"检索耗时: {retrieve_sec:.3f}秒")
     print("=" * 50)
 
-    # ---- 拼：受控生成 ----
-    llm = build_llm()
-    messages = [
-        SystemMessage(content=SYSTEM_PROMPT),
-        HumanMessage(content=f"问题：{question}\n\n证据：\n{evidence}"),
-    ]
+    # ---- 拼：受控生成（LLM 是增强层：挂了不拖垮主链路，退回抽取式兜底）----
     t0 = time.perf_counter()
-    answer = _clean(llm.invoke(messages).content)
-    print(f"生成耗时: {time.perf_counter() - t0:.3f}秒")
-    print(answer)
+    try:
+        llm = build_llm()  # 构建也可能炸（如 dashscope 模式没配 key），一并圈进保险杠
+        messages = [
+            SystemMessage(content=SYSTEM_PROMPT),
+            HumanMessage(content=f"问题：{question}\n\n证据：\n{evidence}"),
+        ]
+        answer = _clean(llm.invoke(messages).content)
+        print(f"生成耗时: {time.perf_counter() - t0:.3f}秒")
+        print(answer)
+    except Exception as exc:
+        # 学 drug_rag _controlled_llm_answer 的 except 分支：Ollama 没开/key 失效/模型404
+        # 都走这里——检索已经成功，证据直接上桌，用户至少看得到菜谱
+        print(f"生成层提示：LLM 不可用（{type(exc).__name__}），已退回抽取式兜底答案。")
+        for i, (doc, _) in enumerate(docs, start=1):
+            print(f"\n【证据{i}】{doc.metadata[label_key]}")
+            print(doc.page_content)
 
     # ---- 来源盖章：检索层已知的信息不让 LLM 抄——确定性的事交给代码 ----
     # 名字从 metadata 现取（菜名/展示名），保序去重防同名连锁重复
