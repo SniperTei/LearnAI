@@ -23,14 +23,14 @@ EMBEDDINGS = OllamaEmbeddings(model="bge-m3")
 
 
 def build_filter(question: str, db: str, type_filter: str | None, max_price: int | None = None,
-                 difficulty: str | list[str] | None = None) -> dict | None:
-    """过滤卡：片子拼装——名字片/类型片/价格片/难度片，单片不包壳、多片包 $and
+                 difficulty: str | list[str] | None = None, area: list[str] | None = None) -> dict | None:
+    """过滤卡：片子拼装——名字片/类型片/价格片/难度片/商圈片，单片不包壳、多片包 $and
     （拼装规矩学 drug_rag build_metadata_filter，第3关验证过：单片直接用，多片才包壳）。
 
     价格片/难度片各有两条来路：CLI 手动指定优先，没传就从问题里自动提取
     （"人均50以内"→价格片，"来个简单的"→难度片）。各守各的仓：
-    价格片只给饭店仓（菜品仓没人均字段），难度片只给菜品仓（饭店仓没难度字段）——
-    串仓加片必 0 命中。
+    价格片/商圈片只给饭店仓（菜品仓没这俩字段），难度片只给菜品仓（饭店仓没难度字段）——
+    串仓加片必 0 命中。商圈片来自外卖地址槽（反问的答案归一成商圈值）。
     """
     cfg = DB_CONFIG[db]
     if max_price is None:
@@ -49,6 +49,8 @@ def build_filter(question: str, db: str, type_filter: str | None, max_price: int
     if difficulty is not None and db == "menu":
         # 难度可以是单值("简单")或多值(["费工夫","一般"]——人多混搭凑桌，$in 同店名多命中)
         pieces.append({"难度": {"$in": difficulty} if isinstance(difficulty, list) else difficulty})
+    if area and db == "restaurant":
+        pieces.append({"商圈": area[0] if len(area) == 1 else {"$in": area}})
 
     if not pieces:
         return None

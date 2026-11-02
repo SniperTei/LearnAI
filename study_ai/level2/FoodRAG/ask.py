@@ -24,7 +24,7 @@ import time
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_ollama import ChatOllama
 
-from router import DB_CONFIG, normalize, resolve_db
+from router import DB_CONFIG, load_rows, match_areas, normalize, resolve_db
 from search import build_filter, get_store
 
 # ==== 切换开关：ollama / dashscope ====
@@ -126,6 +126,22 @@ def ask(question: str, k: int = 3, max_price: int | None = None,
     # ---- 路由 + 查：复用 search.py 的判单树 ----
     db, reason = resolve_db(question)
 
+    # ---- 外卖地址槽：没带位置就反问，认不出商圈直接如实说"没搜到" ----
+    # （宁可没有，不推错的——账本里没收录的位置，推别片的店就是事故）
+    area: list[str] | None = None
+    if reason.startswith("场景词: 外卖系"):
+        area = match_areas(question)
+        if not area:
+            ans = _ask("点外卖呀。你在哪个商圈/位置附近？（如：坂田、龙华、罗湖万象城）")
+            area = match_areas(ans)
+            if not area:
+                all_areas = sorted({r["metadata"]["商圈"] for r in load_rows("restaurant")
+                                    if r["metadata"].get("商圈")})
+                print(f"没搜索到「{ans or '（未作答）'}」附近收录的店。"
+                      f"目前账本里的商圈：{'、'.join(all_areas)}")
+                return
+        reason += f"·址槽:{area}"
+
     # ---- 槽位补全：判单树落到兜底（无任何信号）才启动，按日子补默认或反问 ----
     if reason.startswith("兜底"):
         db, reason, slot_difficulty, slot_k = clarify(question)
@@ -135,7 +151,7 @@ def ask(question: str, k: int = 3, max_price: int | None = None,
             k = max(k, slot_k)  # 请朋友凑一桌，多取几块证据
 
     dish_filter = build_filter(question, db, type_filter=None, max_price=max_price,
-                               difficulty=difficulty)
+                               difficulty=difficulty, area=area)
     t0 = time.perf_counter()
     docs = get_store(db).similarity_search_with_relevance_scores(
         question, k=k, filter=dish_filter

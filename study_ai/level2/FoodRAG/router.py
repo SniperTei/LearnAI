@@ -135,6 +135,13 @@ def extract_difficulty(question: str) -> str | None:
     return None
 
 
+def match_areas(text: str) -> list[str]:
+    """商圈匹配：商圈值 in 文本。路由第④分支和外卖地址槽共用——
+    问题里带商圈、用户反问答的地址，都用它认（"坂田"→坂田）。"""
+    areas = [r["metadata"]["商圈"] for r in load_rows("restaurant") if r["metadata"].get("商圈")]
+    return match_names(text, areas)
+
+
 def resolve_db(question: str) -> tuple[str, str]:
     """选仓判单树：返回 (仓库名, 路由理由)——理由进 trace，路由不黑盒。"""
     shop_hits = match_names(question, [r["metadata"]["店名"] for r in load_rows("restaurant")])
@@ -150,10 +157,7 @@ def resolve_db(question: str) -> tuple[str, str]:
         return "restaurant", "场景词: 外卖系"
     if any(w in q for w in SCENE_MENU_WORDS):
         return "menu", "场景词: 家饭系"
-    area_hits = match_names(
-        question,
-        [r["metadata"]["商圈"] for r in load_rows("restaurant") if r["metadata"].get("商圈")],
-    )
+    area_hits = match_areas(question)
     if area_hits:
         return "restaurant", f"命中商圈: {area_hits}"
     return "menu", "兜底: 默认菜品仓"
