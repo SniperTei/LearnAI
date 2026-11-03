@@ -319,6 +319,7 @@ def ask_core(question: str, k: int = 3, max_price: int | None = None,
         "db": db,
         "reason": reason,
         "evidence": [doc.metadata[label_key] for doc, _ in docs],  # 菜名/展示名列表
+        "contexts": [doc.page_content for doc, _ in docs],  # 证据原文（LLM裁判/调试用）
         "retrieve_sec": retrieve_sec,
     }
 

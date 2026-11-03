@@ -29,3 +29,14 @@
 
 
 
+### RAG评估框架
+#### Ragas
+* context_precision
+* context_recall
+* faithfulness
+* answer_relevancy
+
+
+### Trulens 
+* 对agent更友好
+
