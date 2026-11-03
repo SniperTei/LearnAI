@@ -34,13 +34,17 @@ import time
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_ollama import ChatOllama
+from dotenv import load_dotenv
 
 from router import (DB_CONFIG, extract_difficulty, load_rows, match_areas, match_db_names,
                     normalize, resolve_db)
 from search import build_filter, get_store
 
+# 密钥进本目录 .env（已进 .gitignore 不上传）；终端里有没有 export 都能跑
+load_dotenv()
+
 # ==== 切换开关：ollama / dashscope ====
-PROVIDER = "ollama"
+PROVIDER = "dashscope"
 
 SYSTEM_PROMPT = """你是金燕美食助手，负责回答做菜问题和饭店推荐。规则：
 1. 只能依据下面提供的证据回答，证据里没有的信息就明说"资料里没有"，不要编造。
