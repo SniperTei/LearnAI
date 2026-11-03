@@ -151,7 +151,9 @@ def context_precision(question: str, contexts: list[str]) -> float | None:
     print("=" * 60)
     numbered = "\n".join(f"【证据{i}】{c}" for i, c in enumerate(contexts, start=1))
     vd = judge(ChunkVerdicts,
-        f"问题：{question}\n\n逐块判决下面的证据对回答该问题有没有用（能不能直接用上其中内容）。\n\n{numbered}")
+        f"问题：{question}\n\n逐块判决下面的证据对回答该问题有没有用（能不能直接用上其中内容）。\n"
+        "注意：开头那行'菜名 类型 口味 难度'只是标签行，判断要看后面的正文内容——"
+        f"正文里含有回答问题所需信息的就算有用。\n\n{numbered}")
     verdicts = {v.编号: v for v in vd.判决}
 
     useful_at = []  # (排名k, 是否有用)
