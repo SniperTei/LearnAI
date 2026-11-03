@@ -1,0 +1,21 @@
+{"question": "锅包肉怎么做", "expect_type": "answer", "expect_db": "menu", "expect_names": ["锅包肉"], "note": "锁菜直答"}
+{"question": "孜然牛肉怎么做", "expect_type": "answer", "expect_db": "menu", "expect_names": ["孜盐牛肉"], "note": "别名归一（11-02 bug题：孜然→孜盐）"}
+{"question": "大富烧鸡怎么样", "expect_type": "answer", "expect_db": "restaurant", "expect_names": ["大富烧鸡（坂田店）", "大富烧鸡（锦绣店）"], "note": "连锁多命中=两分店全召回"}
+{"question": "沙县小吃在哪", "expect_type": "answer", "expect_db": "restaurant", "expect_names": ["沙县小吃"], "note": "判单树①店名分支"}
+{"question": "明天加班中午吃什么", "expect_type": "answer", "expect_db": "restaurant", "note": "实战补词（10-31：加班漏到兜底走错仓）"}
+{"question": "周二中午吃什么", "expect_type": "answer", "expect_db": "restaurant", "note": "11-03 bug①：工作日中午默认工作餐"}
+{"question": "周二晚上吃什么", "expect_type": "answer", "expect_db": "menu", "expect_all": {"难度": ["简单", "一般"]}, "expect_cover": {"类型": ["荤菜", "素菜"], "难度": ["简单", "一般"]}, "note": "11-03 新规：工作日晚两人餐=快手荤1+快手素1+一般2，不要费工夫"}
+{"question": "周二晚上想吃硬菜", "expect_type": "answer", "expect_db": "menu", "expect_all": {"难度": ["简单", "一般"]}, "expect_reason_contains": "工作日不给费工夫", "note": "11-03 新规：费工夫周一~四不要，问句点名要硬菜也不给（trace如实记）"}
+{"question": "人均50以内有什么好吃的", "expect_type": "answer", "expect_db": "restaurant", "expect_lte": {"人均": 50}, "note": "人均数值过滤（备菜线int投资回本）"}
+{"question": "坂田有什么好吃的", "expect_type": "answer", "expect_db": "restaurant", "expect_all": {"商圈": "坂田"}, "note": "判单树④商圈分支"}
+{"question": "周末吃什么", "expect_type": "input", "expect_slot": "dine", "note": "周末反问在家/出去"}
+{"question": "周六晚上我们想邀请姐姐姐夫来家里吃饭，做点什么菜好呢？", "expect_type": "input", "expect_slot": "count", "note": "11-03 bug③：问句预填，只反问几位"}
+{"question": "周六在家吃点啥", "expect_type": "answer", "expect_db": "menu", "note": "已知不对称在案：场景词'在家吃'判单树接走不反问"}
+{"question": "点外卖", "expect_type": "input", "expect_slot": "area", "note": "外卖系→地址槽反问"}
+{"question": "点外卖", "answers": {"area": "火星"}, "expect_type": "miss", "note": "认不出的商圈如实说没搜到（宁可没有不推错的）"}
+{"question": "不想做饭", "expect_type": "input", "expect_slot": "area", "note": "懒人系=外卖系（词序优先级：排家饭系前防截胡）"}
+{"question": "它的注意点是什么", "history": [{"question": "锅包肉怎么做", "answer": "锅包肉是酸甜口荤菜……", "lock": "锅包肉"}], "expect_type": "answer", "expect_db": "menu", "expect_names": ["锅包肉"], "expect_reason_contains": "历史带锁", "note": "历史带锁改写检索词（迷你版query_rewriter）"}
+{"question": "周末吃什么", "answers": {"dine": "在家", "party": "请朋友来", "count": "6位"}, "expect_type": "answer", "expect_db": "menu", "expect_all": {"难度": ["费工夫", "一般", "简单"]}, "expect_evidence_count": 8, "note": ">4人局：难度混搭+k=人数+2"}
+{"question": "周末吃什么", "answers": {"dine": "在家", "party": "请朋友来", "count": "6位"}, "expect_type": "answer", "expect_db": "menu", "expect_cover": {"类型": ["荤菜", "素菜"], "难度": ["费工夫", "一般", "简单"]}, "note": "三路配额：荤素×三档难度全覆盖（11-03 新规：不是费工夫越多越好）"}
+{"question": "周末吃什么", "answers": {"dine": "在家", "party": "请朋友来", "count": "4位"}, "expect_type": "answer", "expect_db": "menu", "expect_all": {"难度": ["费工夫", "简单"]}, "expect_cover": {"类型": ["荤菜", "素菜"], "难度": ["费工夫", "简单"]}, "expect_evidence_count": 7, "note": "≤4人硬菜局按普适规矩补素：硬菜5+快手素2（11-03 新规）"}
+{"question": "周末吃什么", "answers": {"dine": "在家", "party": "就我们俩"}, "expect_type": "answer", "expect_db": "menu", "expect_cover": {"类型": ["荤菜", "素菜"]}, "expect_evidence_count": 3, "note": "周末两人餐：荤2素1，难度不限（只要在家做都荤素搭配）"}

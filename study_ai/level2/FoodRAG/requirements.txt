@@ -7,3 +7,7 @@ langchain-ollama==1.1.0
 
 # 可选：ask.py 的 PROVIDER 切到 "dashscope" 时才需要
 langchain-openai==1.6.6
+
+# web 前端（python web.py 起服务，浏览器开 127.0.0.1:8000）
+fastapi==0.121.3
+uvicorn==0.38.0

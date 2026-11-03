@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>金燕美食助手</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: #f5f5f4; height: 100vh; display: flex; flex-direction: column;
+  }
+  header {
+    background: #1f2937; color: #fff; padding: 14px 20px; font-size: 17px;
+    display: flex; align-items: center; gap: 10px;
+  }
+  header .dot { width: 10px; height: 10px; border-radius: 50%; background: #34d399; }
+  #chat {
+    flex: 1; overflow-y: auto; padding: 20px;
+    display: flex; flex-direction: column; gap: 14px;
+  }
+  .msg { max-width: 78%; padding: 10px 14px; border-radius: 12px;
+         white-space: pre-wrap; line-height: 1.65; font-size: 15px; }
+  .user { align-self: flex-end; background: #059669; color: #fff; border-bottom-right-radius: 3px; }
+  .bot  { align-self: flex-start; background: #fff; border: 1px solid #e7e5e4;
+          border-bottom-left-radius: 3px; }
+  .bot.miss { background: #fef3c7; border-color: #fcd34d; }
+  .thinking { align-self: flex-start; color: #78716c; font-size: 14px; padding: 6px 2px; }
+  .thinking span { animation: blink 1.2s infinite; }
+  @keyframes blink { 50% { opacity: .25; } }
+  details.trace {
+    margin-top: 10px; border-top: 1px dashed #d6d3d1; padding-top: 6px;
+    font-size: 12.5px; color: #57534e;
+  }
+  details.trace summary { cursor: pointer; user-select: none; color: #059669; }
+  details.trace div { margin-top: 4px; }
+  .slots { align-self: flex-start; display: flex; flex-wrap: wrap; gap: 8px; max-width: 78%; }
+  .slots button {
+    padding: 8px 16px; border-radius: 18px; border: 1px solid #059669;
+    background: #fff; color: #059669; font-size: 14px; cursor: pointer;
+  }
+  .slots button:hover { background: #059669; color: #fff; }
+  #inputbar {
+    display: flex; gap: 10px; padding: 14px 20px; background: #fff;
+    border-top: 1px solid #e7e5e4;
+  }
+  #inputbar input {
+    flex: 1; padding: 11px 16px; border: 1px solid #d6d3d1; border-radius: 22px;
+    font-size: 15px; outline: none;
+  }
+  #inputbar input:focus { border-color: #059669; }
+  #inputbar button {
+    padding: 11px 24px; border: none; border-radius: 22px; background: #059669;
+    color: #fff; font-size: 15px; cursor: pointer;
+  }
+  #inputbar button:disabled { background: #a7f3d0; cursor: not-allowed; }
+</style>
+</head>
+<body>
+<header><div class="dot"></div>金燕美食助手 <small style="opacity:.6;font-weight:normal">（证据哪来的，点开每条回答下面的"trace"看）</small></header>
+<div id="chat"></div>
+<div id="inputbar">
+  <input id="q" placeholder="问点什么，如：锅包肉怎么做 / 周末吃什么 / 点外卖" autocomplete="off">
+  <button id="send">发送</button>
+</div>
+
+<script>
+// ==== 前端的两本账（服务端零状态的代价：记账的活全在这）====
+let history = [];        // 最近 2 轮 {question, answer, lock}——喂生成层 + 历史带锁
+let answers = {};        // 槽位累积答案（dine/party/count/area）——出结果就清空
+let pendingSlot = null;  // 正在等哪个槽的答案（null = 正常提问模式）
+let currentQuestion = "";// 反问期间记住本轮原问题（几次补槽都是为它服务）
+
+const chat = document.getElementById("chat");
+const qInput = document.getElementById("q");
+const sendBtn = document.getElementById("send");
+
+function addMsg(cls, text) {
+  const div = document.createElement("div");
+  div.className = "msg " + cls;
+  div.textContent = text;
+  chat.appendChild(div);
+  chat.scrollTop = chat.scrollHeight;
+  return div;
+}
+
+function addThinking() {
+  const div = document.createElement("div");
+  div.className = "thinking";
+  div.innerHTML = "正在查证据、想答案<span>…</span>（本地小模型，可能要等一会儿）";
+  chat.appendChild(div);
+  chat.scrollTop = chat.scrollHeight;
+  return div;
+}
+
+// trace 面板：路由→证据→耗时→来源，一条不落（数据版监控录像）
+function addTrace(div, trace) {
+  const d = document.createElement("details");
+  d.className = "trace";
+  const secs = [`检索 ${trace.retrieve_sec.toFixed(3)}秒`];
+  if (trace.gen_sec !== undefined) secs.push(`生成 ${trace.gen_sec.toFixed(3)}秒`);
+  let html = `<summary>trace：仓库 ${trace.db}${trace.fallback ? "（LLM挂了，已退回证据兜底）" : ""}</summary>`;
+  html += `<div>路由：${trace.reason}</div>`;
+  html += `<div>证据：${trace.evidence.join("、")}</div>`;
+  html += `<div>耗时：${secs.join(" / ")}</div>`;
+  html += `<div>来源：${trace.sources.join("、")}</div>`;
+  d.innerHTML = html;
+  div.appendChild(d);
+}
+
+function addSlotButtons(slot) {
+  const wrap = document.createElement("div");
+  wrap.className = "slots";
+  const options = {
+    dine:  ["在家吃", "出去吃"],
+    party: ["就我们两人", "请朋友来"],
+    count: ["3位", "4位", "6位", "8位"],
+  }[slot];
+  options.forEach(label => {
+    const btn = document.createElement("button");
+    btn.textContent = label;
+    btn.onclick = () => { wrap.remove(); answerSlot(label); };
+    wrap.appendChild(btn);
+  });
+  chat.appendChild(wrap);
+  chat.scrollTop = chat.scrollHeight;
+}
+
+// ==== 每轮请求：历史和槽位答案原样回传，服务端只出题不记账 ====
+async function callApi() {
+  const res = await fetch("/api/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ question: currentQuestion, history, answers }),
+  });
+  return res.json();
+}
+
+async function askQuestion(question) {
+  currentQuestion = question;
+  addMsg("user", question);
+  await run();
+}
+
+async function answerSlot(label) {
+  answers[pendingSlot] = label;
+  addMsg("user", label);
+  await run();
+}
+
+async function run() {
+  qInput.disabled = sendBtn.disabled = true;
+  const think = addThinking();
+  try {
+    const r = await callApi();
+    think.remove();
+    if (r.type === "input") {
+      // 缺槽位：prompt 上屏 + 出选项按钮；area 没选项，用户直接在输入框打字
+      pendingSlot = r.slot;
+      addMsg("bot", r.prompt);
+      if (r.slot !== "area") addSlotButtons(r.slot);
+      qInput.placeholder = r.slot === "area"
+        ? "输入你的商圈/位置，如：坂田"
+        : "点上面的按钮，或直接打字回答";
+    } else if (r.type === "miss") {
+      // 没搜到/没检索到：如实说不编造，本轮不进历史
+      resetTurn();
+      addMsg("bot miss", r.reply);
+    } else {
+      // 正式答案：进历史（只留 2 轮），trace 挂在答案气泡下面
+      history.push({ question: currentQuestion, answer: r.reply, lock: r.lock });
+      history = history.slice(-2);
+      const div = addMsg("bot", r.reply);
+      addTrace(div, r.trace);
+      resetTurn();
+    }
+  } catch (e) {
+    think.remove();
+    addMsg("bot miss", "服务没连上（web.py 起了吗？）：" + e.message);
+    resetTurn();
+  }
+  qInput.disabled = sendBtn.disabled = false;
+  qInput.placeholder = "问点什么，如：锅包肉怎么做 / 周末吃什么 / 点外卖";
+  qInput.focus();
+}
+
+function resetTurn() { pendingSlot = null; answers = {}; currentQuestion = ""; }
+
+sendBtn.onclick = () => {
+  const text = qInput.value.trim();
+  if (!text) return;
+  qInput.value = "";
+  if (pendingSlot) answerSlot(text);   // 反问期间：输入框的字号 = 槽位答案
+  else askQuestion(text);
+};
+qInput.addEventListener("keydown", e => {
+  if (e.key === "Enter") sendBtn.click();
+});
+
+addMsg("bot", "金燕美食助手已上线，直接开问。问做法、找店、点外卖都行——答不出我会直说，不编。");
+</script>
+</body>
+</html>

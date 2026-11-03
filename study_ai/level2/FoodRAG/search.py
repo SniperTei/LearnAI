@@ -16,14 +16,15 @@ import time
 from langchain_chroma import Chroma
 from langchain_ollama import OllamaEmbeddings
 
-from router import (CHROMA_DIR, DB_CONFIG, extract_difficulty, extract_max_price,
+from router import (CHROMA_DIR, DB_CONFIG, extract_difficulty, extract_max_price, match_areas,
                     match_db_names, resolve_db)
 
 EMBEDDINGS = OllamaEmbeddings(model="bge-m3")
 
 
 def build_filter(question: str, db: str, type_filter: str | None, max_price: int | None = None,
-                 difficulty: str | list[str] | None = None, area: list[str] | None = None) -> dict | None:
+                 difficulty: str | list[str] | None = None, area: list[str] | None = None,
+                 no_difficulty: bool = False) -> dict | None:
     """过滤卡：片子拼装——名字片/类型片/价格片/难度片/商圈片，单片不包壳、多片包 $and
     （拼装规矩学 drug_rag build_metadata_filter，第3关验证过：单片直接用，多片才包壳）。
 
@@ -31,11 +32,14 @@ def build_filter(question: str, db: str, type_filter: str | None, max_price: int
     （"人均50以内"→价格片，"来个简单的"→难度片）。各守各的仓：
     价格片/商圈片只给饭店仓（菜品仓没这俩字段），难度片只给菜品仓（饭店仓没难度字段）——
     串仓加片必 0 命中。商圈片来自外卖地址槽（反问的答案归一成商圈值）。
+
+    no_difficulty：配额检索模式的专用闸——难度片只归配额路管，这时连问句提取也关掉
+    （不然"想吃硬菜"挖出费工夫片，和配额片的简单/一般拼成矛盾条件，三路全 0 命中）。
     """
     cfg = DB_CONFIG[db]
     if max_price is None:
         max_price = extract_max_price(question)
-    if difficulty is None:
+    if difficulty is None and not no_difficulty:
         difficulty = extract_difficulty(question)
 
     pieces: list[dict] = []
@@ -72,7 +76,9 @@ def search(question: str, db: str | None = None, type_filter: str | None = None,
         db, reason = resolve_db(question)
     else:
         reason = "手动指定 --db"
-    dish_filter = build_filter(question, db, type_filter, max_price=max_price, difficulty=difficulty)
+    # 路由命中商圈→过滤卡带商圈片（和 ask_core 同一条缝，eval#10 逮住后两处一起缝）
+    area = match_areas(question) if reason.startswith("命中商圈") else None
+    dish_filter = build_filter(question, db, type_filter, max_price=max_price, difficulty=difficulty, area=area)
 
     # ---- trace 打印（监控录像：路由→filter→战果）----
     print(f"问题: {question}")
