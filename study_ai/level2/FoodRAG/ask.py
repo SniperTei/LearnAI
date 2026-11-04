@@ -28,9 +28,11 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import json
 import os
 import re
 import time
+from pathlib import Path
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_ollama import ChatOllama
@@ -220,14 +222,40 @@ def _clarify_slots(question: str, answers: dict) -> dict:
 FOLLOWUP_MARKERS = ["它", "这道", "这个", "这家", "那道", "那个", "那家", "刚才", "前面", "上面", "第二"]
 
 
+# ==== 答案缓存：好答案存下来，同题直读（响应缓存，学 HTTP 缓存/CDN 的思路）====
+# 命中一次 = 省一整次 LLM 调用（token 归零 + 秒回 + 答案永远是你认可的那版）。
+# 命门两条都有对策：过期 = 改了 SYSTEM_PROMPT/语料后手动清空 json；错答案钉死 = 只准手动收藏。
+
+ANSWER_CACHE_PATH = Path(__file__).parent / "data" / "answer_cache.json"
+
+
+def load_answer_cache() -> dict:
+    """读缓存账本：{问题: {answer, lock, sources, saved_at}}。文件不存在当空账。"""
+    if not ANSWER_CACHE_PATH.exists():
+        return {}
+    return json.loads(ANSWER_CACHE_PATH.read_text(encoding="utf-8"))
+
+
+def save_answer_cache(question: str, answer: str, lock: str | None,
+                      sources: list[str]) -> int:
+    """存一题标准答案（同题覆盖），返回账本总数。web 的收藏按钮调这里。"""
+    data = load_answer_cache()
+    data[question] = {"answer": answer, "lock": lock, "sources": sources,
+                      "saved_at": datetime.date.today().isoformat()}
+    ANSWER_CACHE_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2),
+                                 encoding="utf-8")
+    return len(data)
+
+
 def ask_core(question: str, k: int = 3, max_price: int | None = None,
              difficulty: str | list[str] | None = None,
              history: list[dict] | None = None,
-             answers: dict | None = None) -> dict:
-    """问答核（无 I/O）：路由→检索→受控生成，全程不 print 不 input。
+             answers: dict | None = None, use_cache: bool = True) -> dict:
+    """问答核（无 I/O）：缓存检查→路由→检索→受控生成，全程不 print 不 input。
 
     answers = 反问槽位的累积答案（{"dine":…, "party":…, "count":…, "area":…}），
     由调用方持有并回传——web 前端每轮带上，CLI 循环里攒，服务端零状态。
+    use_cache = 关掉缓存（eval 判卷用：考卷必须真检索，吃缓存等于抄旧答案）。
     返回三种结果（CLI 和 web 都认这套合同）：
         {"type": "input",  "slot": 槽名, "prompt": 提示语}      还缺槽位，拿 prompt 去问用户
         {"type": "miss",   "reply": 文本}                        没搜到/没检索到，本轮不进历史
@@ -235,6 +263,18 @@ def ask_core(question: str, k: int = 3, max_price: int | None = None,
     trace = 监控录像的数据版（CLI 拿去打印，web 拿去渲染折叠面板）。
     """
     answers = answers or {}
+
+    # ---- 答案缓存（放在一切之前）：一字不差 + 没有历史才查 ----
+    # 两个"才"都是安全闸：问法不同=可能要不同答案（精确匹配，不赌相似）；
+    # 有历史=这题可能是追问（"它的注意点"），答案依赖上文，按问题单独存必出错。
+    if use_cache and not history:
+        cached = load_answer_cache().get(question)
+        if cached:
+            return {"type": "answer", "reply": cached["answer"], "lock": cached["lock"],
+                    "trace": {"db": "缓存", "reason": "答案缓存命中——0次LLM调用，直接上桌",
+                              "evidence": [], "retrieve_sec": 0.0, "gen_sec": 0.0,
+                              "fallback": False, "sources": cached.get("sources", []),
+                              "cached": True}}
 
     # ---- 路由 + 查：复用 search.py 的判单树 ----
     db, reason = resolve_db(question)

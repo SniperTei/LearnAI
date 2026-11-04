@@ -15,6 +15,12 @@
     display: flex; align-items: center; gap: 10px;
   }
   header .dot { width: 10px; height: 10px; border-radius: 50%; background: #34d399; }
+  header .hbtn {
+    margin-left: 8px; padding: 4px 12px; border-radius: 14px; font-size: 13px;
+    border: 1px solid #4b5563; background: transparent; color: #d1d5db; cursor: pointer;
+  }
+  header .hbtn:hover { border-color: #34d399; color: #34d399; }
+  header .spacer { flex: 1; }
   #chat {
     flex: 1; overflow-y: auto; padding: 20px;
     display: flex; flex-direction: column; gap: 14px;
@@ -34,6 +40,11 @@
   }
   details.trace summary { cursor: pointer; user-select: none; color: #059669; }
   details.trace div { margin-top: 4px; }
+  .savebtn {
+    margin-top: 6px; padding: 3px 12px; border-radius: 12px; font-size: 12.5px;
+    border: 1px solid #f59e0b; background: #fff; color: #b45309; cursor: pointer;
+  }
+  .savebtn:disabled { border-color: #d6d3d1; color: #78716c; cursor: default; }
   .slots { align-self: flex-start; display: flex; flex-wrap: wrap; gap: 8px; max-width: 78%; }
   .slots button {
     padding: 8px 16px; border-radius: 18px; border: 1px solid #059669;
@@ -57,7 +68,11 @@
 </style>
 </head>
 <body>
-<header><div class="dot"></div>金燕美食助手 <small style="opacity:.6;font-weight:normal">（证据哪来的，点开每条回答下面的"trace"看）</small></header>
+<header><div class="dot"></div>金燕美食助手 <small style="opacity:.6;font-weight:normal">（证据哪来的，点开每条回答下面的"trace"看）</small>
+  <span class="spacer"></span>
+  <button class="hbtn" id="mealAdd">🍽 记一笔吃了啥</button>
+  <button class="hbtn" id="mealQuery">📋 近7天吃了啥</button>
+</header>
 <div id="chat"></div>
 <div id="inputbar">
   <input id="q" placeholder="问点什么，如：锅包肉怎么做 / 周末吃什么 / 点外卖" autocomplete="off">
@@ -70,6 +85,7 @@ let history = [];        // 最近 2 轮 {question, answer, lock}——喂生成
 let answers = {};        // 槽位累积答案（dine/party/count/area）——出结果就清空
 let pendingSlot = null;  // 正在等哪个槽的答案（null = 正常提问模式）
 let currentQuestion = "";// 反问期间记住本轮原问题（几次补槽都是为它服务）
+let lastAnswer = null;   // 最近一条正式答案（收藏按钮要打包 question/answer/lock/sources）
 
 const chat = document.getElementById("chat");
 const qInput = document.getElementById("q");
@@ -172,6 +188,12 @@ async function run() {
       history = history.slice(-2);
       const div = addMsg("bot", r.reply);
       addTrace(div, r.trace);
+      // 收藏按钮：缓存命中的答案本身就来收藏夹，不用再存
+      if (!r.trace.cached) {
+        lastAnswer = { question: currentQuestion, answer: r.reply,
+                       lock: r.lock, sources: r.trace.sources || [] };
+        addSaveBtn(div);
+      }
       resetTurn();
     }
   } catch (e) {
@@ -185,6 +207,54 @@ async function run() {
 }
 
 function resetTurn() { pendingSlot = null; answers = {}; currentQuestion = ""; }
+
+// ==== 收藏按钮：这一版答案好 → 存进缓存，下次同题 0 次 LLM 调用直接上桌 ====
+function addSaveBtn(div) {
+  const btn = document.createElement("button");
+  btn.className = "savebtn";
+  btn.textContent = "⭐ 存为标准答案";
+  btn.onclick = async () => {
+    btn.disabled = true;
+    btn.textContent = "保存中…";
+    try {
+      const res = await fetch("/api/answer_cache", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(lastAnswer),
+      });
+      const j = await res.json();
+      btn.textContent = j.ok ? "✓ 已存，下次同题秒回" : "保存失败：" + (j.error || "");
+    } catch (e) {
+      btn.textContent = "保存失败：" + e.message;
+    }
+  };
+  div.appendChild(btn);
+}
+
+// ==== 吃饭账本：记一笔 / 查近7天 ====
+async function postJSON(url, body) {
+  const res = await fetch(url, { method: "POST",
+    headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  return res.json();
+}
+
+document.getElementById("mealAdd").onclick = async () => {
+  const date = prompt("几号吃的？（如 11-04，回车 = 今天）", "今天");
+  if (date === null) return;
+  const raw = prompt("吃了啥？（逗号分隔，如：锅包肉, 拌黄瓜）");
+  if (!raw) return;
+  const items = raw.split(/[,，、]/).map(s => s.trim()).filter(Boolean);
+  const j = await postJSON("/api/meals", { date: date || "今天", items });
+  addMsg("bot", j.ok ? `记上了：${j.date} 吃了 ${items.join("、")}` : j.error);
+};
+
+document.getElementById("mealQuery").onclick = async () => {
+  const res = await fetch("/api/meals?days=7");
+  const j = await res.json();
+  if (!j.meals.length) { addMsg("bot", "近7天还没记过饭账。点右上「记一笔吃了啥」开始记。"); return; }
+  const lines = j.meals.map(e => `${e.date}：${e.items.join("、")}`);
+  addMsg("bot", "近7天饭账：\n" + lines.join("\n"));
+};
 
 sendBtn.onclick = () => {
   const text = qInput.value.trim();

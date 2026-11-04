@@ -66,7 +66,7 @@ def run_case(case: dict, meta_index: dict[str, dict]) -> list[str]:
     """跑一题，返回失败清单（空列表 = 通过）。"""
     fails: list[str] = []
     result = ask.ask_core(case["question"], history=case.get("history"),
-                          answers=case.get("answers", {}))
+                          answers=case.get("answers", {}), use_cache=False)
 
     # ① 类型三合同：answer / miss / input
     if result["type"] != case["expect_type"]:
