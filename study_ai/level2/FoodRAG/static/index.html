@@ -117,7 +117,7 @@ function addTrace(div, trace) {
   if (trace.gen_sec !== undefined) secs.push(`生成 ${trace.gen_sec.toFixed(3)}秒`);
   let html = `<summary>trace：仓库 ${trace.db}${trace.fallback ? "（LLM挂了，已退回证据兜底）" : ""}</summary>`;
   html += `<div>路由：${trace.reason}</div>`;
-  html += `<div>证据：${trace.evidence.join("、")}</div>`;
+  html += `<div>证据：${trace.evidence.map((n, i) => trace.evidence_ids?.[i] ? `${n}(${trace.evidence_ids[i]})` : n).join("、")}</div>`;
   html += `<div>耗时：${secs.join(" / ")}</div>`;
   html += `<div>来源：${trace.sources.join("、")}</div>`;
   d.innerHTML = html;

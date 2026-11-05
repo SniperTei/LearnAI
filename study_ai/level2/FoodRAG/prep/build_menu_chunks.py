@@ -59,6 +59,7 @@ def build_chunks() -> list[Document]:
             Document(
                 page_content="\n".join(body_lines),
                 metadata={
+                    "id": str(dish.get("id", "")).strip(),  # 身份证 c001…：改名不变，来源追溯靠它
                     "菜名": name,
                     "类型": dish_type,
                     "口味": taste,

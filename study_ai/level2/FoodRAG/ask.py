@@ -192,9 +192,15 @@ def _clarify_slots(question: str, answers: dict) -> dict:
                 "reason": f"{day_desc}·槽位补全：在家两人餐（荤2素1搭配）",
                 "quotas": quotas, "difficulty": None, "k": 3}
 
-    raw_count = answers.get("count", "")
+    # 人数预填：问句原话报过数（"一共4位"/"我们6个人"）就不再反问，answers 优先。
+    # 不能拿 _parse_count 裸搜问句——它认中文数字，"周六"的"六"会被当 6 个人；
+    # 所以认"数字+位/人/口"的组合（"4位"），单蹦的数字/单字不认。
+    m = re.search(r"(\d+|[两二三四五六七八九十])\s*个?\s*[位人口]", q)
+    prefill_count = m.group(1) if m else None
+    raw_count = answers.get("count", "") or prefill_count
     if not raw_count:
         return {"ask": ("count", "好嘞，一共几位一起吃？")}
+    src = "问句已报" if (prefill_count and not answers.get("count")) else "槽位补全"
     guests = _parse_count(raw_count)
     if guests > 4:
         # 三路配额（迷你版多路召回，学 drug_rag stages）：一桌好菜不靠一路捞——
@@ -208,11 +214,11 @@ def _clarify_slots(question: str, answers: dict) -> dict:
                   ("快手素菜", {"$and": [{"类型": "素菜"}, {"难度": "简单"}]}, 2),
                   ("一般填充", {"难度": "一般"}, n_fill)]
         return {"db": "menu",
-                "reason": f"{day_desc}·槽位补全：请朋友{guests}人（硬菜{n_hard}+快手素2+一般{n_fill}三路配额）",
+                "reason": f"{day_desc}·{src}：请朋友{guests}人（硬菜{n_hard}+快手素2+一般{n_fill}三路配额）",
                 "quotas": quotas, "difficulty": None, "k": k}
     # ≤4人硬菜局：小局硬菜撑住，但"只要在家做都要荤素搭配"（11-03 普适规矩）——补2道快手素解腻
     quotas = [("硬菜", {"难度": "费工夫"}, 5), ("快手素菜", {"$and": [{"类型": "素菜"}, {"难度": "简单"}]}, 2)]
-    return {"db": "menu", "reason": f"{day_desc}·槽位补全：请朋友{guests}人（硬菜局5+快手素2）",
+    return {"db": "menu", "reason": f"{day_desc}·{src}：请朋友{guests}人（硬菜局5+快手素2）",
             "quotas": quotas, "difficulty": None, "k": 7}
 
 
@@ -227,6 +233,44 @@ FOLLOWUP_MARKERS = ["它", "这道", "这个", "这家", "那道", "那个", "�
 # 命门两条都有对策：过期 = 改了 SYSTEM_PROMPT/语料后手动清空 json；错答案钉死 = 只准手动收藏。
 
 ANSWER_CACHE_PATH = Path(__file__).parent / "data" / "answer_cache.json"
+
+# ==== 吃饭账本联动：推荐时避开近几天吃过的（"别老推荐一样的"）====
+MEAL_LOG_PATH = Path(__file__).parent / "data" / "meal_log.json"
+AVOID_DAYS = 7  # 时间窗：近几天吃过的才避让（再往前吃的早馋回来了）
+
+
+def parse_date(text: str) -> datetime.date | None:
+    """日期解析：补年份的短日期(11-04)、完整日期(2026-11-04)、今天/昨天。认不出返回 None。
+    （web.py 的饭账接口共用这把尺子——账本怎么写进来，就怎么读出去。）"""
+    today = datetime.date.today()
+    if text == "今天":
+        return today
+    if text == "昨天":
+        return today - datetime.timedelta(days=1)
+    for fmt, full in (("%Y-%m-%d", True), ("%m-%d", False)):
+        try:
+            raw = text if full else f"{today.year}-{text}"
+            return datetime.datetime.strptime(raw, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def recent_eaten(days: int = AVOID_DAYS) -> list[str]:
+    """翻饭账，捞近 N 天吃过的条目（原始文本，菜名店名混着——归一的活在调用方做）。"""
+    if not MEAL_LOG_PATH.exists():
+        return []
+    try:
+        log = json.loads(MEAL_LOG_PATH.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return []  # 账本写坏了不至于炸推荐，只当没记过
+    today = datetime.date.today()
+    eaten: list[str] = []
+    for entry in log:
+        d = parse_date(str(entry.get("date", "")))
+        if d is not None and 0 <= (today - d).days < days:
+            eaten.extend(str(i) for i in entry.get("items", []))
+    return list(dict.fromkeys(eaten))  # 保序去重（第四次见面）
 
 
 def load_answer_cache() -> dict:
@@ -250,12 +294,16 @@ def save_answer_cache(question: str, answer: str, lock: str | None,
 def ask_core(question: str, k: int = 3, max_price: int | None = None,
              difficulty: str | list[str] | None = None,
              history: list[dict] | None = None,
-             answers: dict | None = None, use_cache: bool = True) -> dict:
+             answers: dict | None = None, use_cache: bool = True,
+             eaten: list[str] | None = None) -> dict:
     """问答核（无 I/O）：缓存检查→路由→检索→受控生成，全程不 print 不 input。
 
     answers = 反问槽位的累积答案（{"dine":…, "party":…, "count":…, "area":…}），
     由调用方持有并回传——web 前端每轮带上，CLI 循环里攒，服务端零状态。
     use_cache = 关掉缓存（eval 判卷用：考卷必须真检索，吃缓存等于抄旧答案）。
+    eaten = 吃饭账本的"近几天吃过"名单；None=自动翻账本，[]=明确不避让（eval 传），
+    有名单=推荐时避开它们（只在没锁名字的纯推荐时生效——点名问"锅包肉怎么做"，
+    昨天吃过也得给做法）。
     返回三种结果（CLI 和 web 都认这套合同）：
         {"type": "input",  "slot": 槽名, "prompt": 提示语}      还缺槽位，拿 prompt 去问用户
         {"type": "miss",   "reply": 文本}                        没搜到/没检索到，本轮不进历史
@@ -338,23 +386,47 @@ def ask_core(question: str, k: int = 3, max_price: int | None = None,
     dish_filter = build_filter(q_retrieval, db, type_filter=None, max_price=max_price,
                                difficulty=None if slot_quotas else difficulty, area=area,
                                no_difficulty=bool(slot_quotas))
-    t0 = time.perf_counter()
-    if slot_quotas:
-        # 三路配额检索：每路 = 公共卡(名字片等) + 配额片 合并出击，倒进同一筐
-        docs, seen = [], set()
-        for route_label, piece, n in slot_quotas:
-            part = get_store(db).similarity_search_with_relevance_scores(
-                q_retrieval, k=n, filter=_merge_filter(dish_filter, piece)
-            )
-            for doc, score in part:
-                name = doc.metadata[label_key]
-                if name not in seen:  # 同菜不占两个名额（难度互斥本不撞，去重是保险）
-                    seen.add(name)
-                    docs.append((doc, score))
-    else:
-        docs = get_store(db).similarity_search_with_relevance_scores(
-            q_retrieval, k=k, filter=dish_filter
+
+    # ---- 吃饭账本联动：纯推荐（没锁名字）时避开近几天吃过的 ----
+    # 只在 lock 为 None 时生效——点名问"锅包肉怎么做"是用户指名要它，吃过也得给；
+    # "吃什么"这种开放推荐才避让（"别老推荐一样的"）。账本条目过 match_db_names
+    # 归一（"孜然牛肉"认成"孜盐牛肉"），对不上的条目如实不排除，不瞎猜。
+    avoid_names: list[str] = []
+    if lock is None:
+        raw_eaten = recent_eaten() if eaten is None else eaten
+        for item in raw_eaten:
+            avoid_names.extend(match_db_names(item, db))
+        avoid_names = list(dict.fromkeys(avoid_names))
+        if avoid_names:
+            reason += f"·避开近{AVOID_DAYS}天吃过的:{'/'.join(avoid_names)}"
+            dish_filter = _merge_filter(dish_filter, {DB_CONFIG[db]["name_key"]: {"$nin": avoid_names}})
+
+    def _retrieve(flt: dict | None) -> list:
+        """一条检索缝两种走法：配额多路倒一筐 / 单路直捞（排除重试也走它，不复制粘贴）。"""
+        if slot_quotas:
+            docs_, seen = [], set()
+            for route_label, piece, n in slot_quotas:
+                part = get_store(db).similarity_search_with_relevance_scores(
+                    q_retrieval, k=n, filter=_merge_filter(flt, piece)
+                )
+                for doc, score in part:
+                    name = doc.metadata[label_key]
+                    if name not in seen:  # 同菜不占两个名额（难度互斥本不撞，去重是保险）
+                        seen.add(name)
+                        docs_.append((doc, score))
+            return docs_
+        return get_store(db).similarity_search_with_relevance_scores(
+            q_retrieval, k=k, filter=flt
         )
+
+    t0 = time.perf_counter()
+    docs = _retrieve(dish_filter)
+    if not docs and avoid_names:
+        # 排除得太狠没菜了：宁可重复不饿肚子——不排除重推，trace 如实记账
+        reason += "·排除后没菜了，不排除重推"
+        docs = _retrieve(build_filter(q_retrieval, db, type_filter=None, max_price=max_price,
+                                      difficulty=None if slot_quotas else difficulty, area=area,
+                                      no_difficulty=bool(slot_quotas)))
     retrieve_sec = time.perf_counter() - t0
     if not docs:
         return {"type": "miss", "reply": "没检索到任何证据，无法回答。"}
@@ -363,6 +435,7 @@ def ask_core(question: str, k: int = 3, max_price: int | None = None,
         "db": db,
         "reason": reason,
         "evidence": [doc.metadata[label_key] for doc, _ in docs],  # 菜名/展示名列表
+        "evidence_ids": [doc.metadata.get("id", "") for doc, _ in docs],  # 身份证 c001/s001：改名也追得到
         "contexts": [doc.page_content for doc, _ in docs],  # 证据原文（LLM裁判/调试用）
         "retrieve_sec": retrieve_sec,
     }
@@ -392,8 +465,14 @@ def ask_core(question: str, k: int = 3, max_price: int | None = None,
         )
 
     # ---- 来源盖章：检索层已知的信息不让 LLM 抄——确定性的事交给代码 ----
-    # 名字从 metadata 现取（菜名/展示名），保序去重防同名连锁重复
-    trace["sources"] = list(dict.fromkeys(doc.metadata[label_key] for doc, _ in docs))
+    # 名字+身份证一起盖（锅包肉(c003)）：名字给人读，id 给追溯——改名后旧账仍对得上人。
+    # 保序去重防同名连锁重复。
+    def _label_with_id(doc) -> str:
+        name = doc.metadata[label_key]
+        did = doc.metadata.get("id", "")
+        return f"{name}({did})" if did else name
+
+    trace["sources"] = list(dict.fromkeys(_label_with_id(doc) for doc, _ in docs))
     return {"type": "answer", "reply": answer, "lock": lock, "trace": trace}
 
 

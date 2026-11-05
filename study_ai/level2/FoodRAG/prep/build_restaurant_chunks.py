@@ -57,6 +57,7 @@ def build_chunks() -> list[Document]:
             Document(
                 page_content=body,
                 metadata={
+                    "id": str(shop.get("id", "")).strip(),  # 身份证 s001…：改名/换分店名都不变
                     "店名": name,
                     "分店": branch,
                     "展示名": display_name,

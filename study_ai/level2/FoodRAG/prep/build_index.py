@@ -30,11 +30,13 @@ CHROMA_DIR = DATA_DIR / "chroma"
 EMBEDDINGS = OllamaEmbeddings(model="bge-m3")
 
 # 入账本 → 出仓库：一张登记表管两条备菜线
+# 块 id 用身份证（c001/s001）：菜改名/店换分店名，块的 id 不变——
+# 旧 id 的引用（收藏的来源、将来 CRUD）不因改名断线。
 BUILD_PLAN = [
     {"jsonl": DATA_DIR / "menu_chunks.jsonl", "collection": "menu_chunks",
-     "id_key": "菜名", "smoke_query": "有什么清淡的汤"},
+     "id_key": "id", "smoke_query": "有什么清淡的汤"},
     {"jsonl": DATA_DIR / "restaurant_chunks.jsonl", "collection": "restaurant_chunks",
-     "id_key": "chunk_id", "smoke_query": "罗湖万象城有什么便宜的工作餐"},
+     "id_key": "id", "smoke_query": "罗湖万象城有什么便宜的工作餐"},
 ]
 
 
@@ -51,7 +53,7 @@ def build_one(jsonl_path: Path, collection: str, id_key: str) -> Chroma:
     rows = load_ledger(jsonl_path)
     texts = [row["page_content"] for row in rows]
     metadatas = [row["metadata"] for row in rows]
-    # id 来源：菜品仓用菜名，饭店仓用 chunk_id（连锁同名靠分店区分）
+    # id 来源：两仓都用账本身份证（backfill_ids 发的 c001/s001），前缀仅防串仓
     ids = [f"{collection}:{row['metadata'][id_key]}" for row in rows]
 
     # 整仓删除重建：mini 规模最稳的幂等。

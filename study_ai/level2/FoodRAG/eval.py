@@ -66,7 +66,8 @@ def run_case(case: dict, meta_index: dict[str, dict]) -> list[str]:
     """跑一题，返回失败清单（空列表 = 通过）。"""
     fails: list[str] = []
     result = ask.ask_core(case["question"], history=case.get("history"),
-                          answers=case.get("answers", {}), use_cache=False)
+                          answers=case.get("answers", {}), use_cache=False,
+                          eaten=case.get("eaten", []))  # []=不避让：考卷不吃真饭账，保持确定性
 
     # ① 类型三合同：answer / miss / input
     if result["type"] != case["expect_type"]:
@@ -92,6 +93,11 @@ def run_case(case: dict, meta_index: dict[str, dict]) -> list[str]:
     for name in case.get("expect_names", []):
         if name not in evidence:
             fails.append(f"证据缺[{name}]（实际{trace['evidence']}）")
+
+    # ⑤b 排除名单：吃过的绝不能出现（吃饭账本联动的专属检查——Hit@k 的反面）
+    for name in case.get("expect_not_names", []):
+        if name in evidence:
+            fails.append(f"避让失败，[{name}]吃过还被推荐（实际{trace['evidence']}）")
 
     # ⑥ 证据块数（如 6人局 k=8）
     if case.get("expect_evidence_count") and len(trace["evidence"]) != case["expect_evidence_count"]:

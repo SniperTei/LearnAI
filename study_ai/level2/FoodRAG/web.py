@@ -28,7 +28,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from ask import ask_core, load_answer_cache, save_answer_cache
+from ask import ask_core, load_answer_cache, parse_date, save_answer_cache
 
 app = FastAPI(title="金燕美食助手")
 
@@ -62,53 +62,99 @@ def chat(body: ChatIn) -> dict:
     return ask_core(body.question, history=body.history, answers=body.answers)
 
 
-# ==== 吃饭账本：几号吃了什么 ====
+# ==== 吃饭账本：几号吃了什么（增删改查四件套）====
+# 条目身份证 id = 记账时间戳（微秒级）：删改靠它指认"哪一笔"，
+# 不用数组下标（删一笔后面全漂移，指认必错）。老条目没 id 的，读时自动补
+# （用它的 recorded_at 当 id——稳定不漂移），补完顺手写回账本。
 
 class MealIn(BaseModel):
     date: str = Field(description="几号吃的，如 11-04 或 2026-11-04（也认'今天/昨天'）")
     items: list[str] = Field(description="吃了啥（菜名/店名列表）")
 
 
-def _parse_date(text: str) -> datetime.date | None:
-    """日期解析：补年份的短日期(11-04)、完整日期(2026-11-04)、今天/昨天。认不出返回 None。"""
-    today = datetime.date.today()
-    if text == "今天":
-        return today
-    if text == "昨天":
-        return today - datetime.timedelta(days=1)
-    for fmt, full in (("%Y-%m-%d", True), ("%m-%d", False)):
-        try:
-            raw = text if full else f"{today.year}-{text}"
-            return datetime.datetime.strptime(raw, fmt).date()
-        except ValueError:
-            continue
-    return None
+class MealUpdate(BaseModel):
+    """改账只准改这两样；id/记账时间不许动（动了账本就失忆了）。"""
+    date: str | None = None
+    items: list[str] | None = None
+
+
+def _load_meals() -> list[dict]:
+    """读饭账 + 给老条目补 id。"""
+    log: list = _read_json(MEAL_LOG_PATH, [])
+    changed = False
+    for i, entry in enumerate(log):
+        if "id" not in entry:
+            entry["id"] = entry.get("recorded_at") or f"row{i}"
+            changed = True
+    if changed:
+        _write_json(MEAL_LOG_PATH, log)
+    return log
+
+
+def _save_meals(log: list[dict]) -> None:
+    log.sort(key=lambda e: e["date"])  # 同一天多笔按日期归拢，查时一天的饭一屏看完
+    _write_json(MEAL_LOG_PATH, log)
 
 
 @app.post("/api/meals")
 def add_meal(body: MealIn) -> dict:
-    date = _parse_date(body.date)
+    date = parse_date(body.date)
     if date is None:
         return {"ok": False, "error": f"认不出日期「{body.date}」，请用 11-04 或 2026-11-04 这种写法"}
-    log: list = _read_json(MEAL_LOG_PATH, [])
-    log.append({"date": date.isoformat(), "items": body.items,
-                "recorded_at": datetime.datetime.now().isoformat(timespec="seconds")})
-    # 同一天多笔：按日期归拢着存，查的时候一天的饭一屏看完
-    log.sort(key=lambda e: e["date"])
-    _write_json(MEAL_LOG_PATH, log)
-    return {"ok": True, "date": date.isoformat(), "items": body.items, "total": len(log)}
+    log = _load_meals()
+    entry = {"id": datetime.datetime.now().isoformat(timespec="microseconds"),
+             "date": date.isoformat(), "items": body.items,
+             "recorded_at": datetime.datetime.now().isoformat(timespec="seconds")}
+    log.append(entry)
+    _save_meals(log)
+    return {"ok": True, "id": entry["id"], "date": entry["date"],
+            "items": entry["items"], "total": len(log)}
 
 
 @app.get("/api/meals")
-def get_meals(days: int = 7) -> dict:
-    """查近 N 天的吃饭账（含今天；认不出的日期条目如实跳过不炸）。"""
+def get_meals(days: int | None = None) -> dict:
+    """查吃饭账：?days=7 查近7天，不带参数查全部（认不出的日期条目如实跳过不炸）。"""
+    if days is None:
+        return {"days": None, "meals": _load_meals()}
     today = datetime.date.today()
-    meals = []
-    for entry in _read_json(MEAL_LOG_PATH, []):
-        d = _parse_date(entry["date"])
-        if d is not None and (today - d).days < days:
-            meals.append(entry)
+    meals = [e for e in _load_meals()
+             if (d := parse_date(e["date"])) is not None and (today - d).days < days]
     return {"days": days, "meals": meals}
+
+
+@app.get("/api/meals/{entry_id}")
+def get_meal(entry_id: str) -> dict:
+    for entry in _load_meals():
+        if entry["id"] == entry_id:
+            return {"ok": True, "meal": entry}
+    return {"ok": False, "error": f"账本里没有 id={entry_id} 这笔"}
+
+
+@app.put("/api/meals/{entry_id}")
+def update_meal(entry_id: str, body: MealUpdate) -> dict:
+    log = _load_meals()  # 读一份、改这份、存这份——中途不能再读（读出来的是没改过的）
+    for entry in log:
+        if entry["id"] == entry_id:
+            if body.date is not None:
+                d = parse_date(body.date)
+                if d is None:
+                    return {"ok": False, "error": f"认不出日期「{body.date}」"}
+                entry["date"] = d.isoformat()
+            if body.items is not None:
+                entry["items"] = body.items
+            _save_meals(log)
+            return {"ok": True, "meal": entry}
+    return {"ok": False, "error": f"账本里没有 id={entry_id} 这笔"}
+
+
+@app.delete("/api/meals/{entry_id}")
+def delete_meal(entry_id: str) -> dict:
+    log = _load_meals()
+    rest = [e for e in log if e["id"] != entry_id]
+    if len(rest) == len(log):
+        return {"ok": False, "error": f"账本里没有 id={entry_id} 这笔"}
+    _write_json(MEAL_LOG_PATH, rest)
+    return {"ok": True, "deleted": entry_id, "total": len(rest)}
 
 
 # ==== 答案缓存账本：标准答案收藏夹 ====
