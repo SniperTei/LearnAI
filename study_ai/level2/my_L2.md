@@ -30,8 +30,28 @@
 
 
 ### RAG评估框架
+
+
+#### 依据
+* 输入的问题
+	* 用户在使用RAG应用时输入的问题
+* 生成的答案
+	* 需要评估的RAG应用的输出，即问题的答案
+* 上下文
+	* 用于增强RAG应用输出的参考上下文，通常在检索阶段生成
+* 参考答案
+	* 输入问题的真实的正确答案，通常需要人类标注
+
+* 检索评估
+	* 上下文精度 Context Precisioin -- 上下文里，用户问的问题相关信息是否靠前
+	* 上下文召回率 Context Recall -- 上下文里，用户问的问题相关信息全不全
+	* 上下文相关性 Context Relavancy -- 上下文中有多少内容与输入问题相关，较少使用。
+* 响应评估
+	* 忠实度 Faithfulness -- 生成的内容是否基于提供的上下文信息
+	* 答案相关性 Answer Relevancy -- 生成的答案是否回答了用户的问题
+
 #### Ragas
-* context_precision
+* context_precision 
 * context_recall
 * faithfulness
 * answer_relevancy
@@ -39,4 +59,5 @@
 
 ### Trulens 
 * 对agent更友好
+
 
