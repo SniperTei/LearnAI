@@ -11,10 +11,10 @@
  ▼
 agent.py（乙方/客户端，LangChain create_agent + qwen3.7-flash）
  │  经 MCPAdapter 拉起 4 个子进程，走 stdio 管道说 JSON-RPC
- ├── inventory_server.py    库存账   data/inventory.json
+ ├── inventory_server.py    库存账   data/inventory.json   ← 站0起带笔：收货入库（跨账本写）
  ├── supplier_server.py     供应商账 data/suppliers.json
  ├── logistics_server.py    运单账   data/logistics.json
- └── procurement_server.py  采购单账 data/orders.json   ← 唯一的"写"Server
+ └── procurement_server.py  采购单账 data/orders.json      ← 写 Server（下单/取消）
 ```
 
 每次你问一句话：LLM 决定调哪把工具 → MCPAdapter 经管道发给对应 Server →
@@ -114,6 +114,7 @@ LLM 做的**——如果问题问到"找谁补、几天到"，它才会去串第
 | Server | 工具 | 读/写 | 设计要点 |
 |---|---|---|---|
 | inventory | `query_stock(sku, warehouse="")` / `list_low_stock()` | 只读 | 查不到诚实返回"未找到"+现有SKU清单 |
+| inventory | `receive_goods(order_id, confirmed=False)` | **写**（站0新增） | 收货入库：订单→已收货 + 库存加数量；同款确认闸门 |
 | supplier | `search_suppliers(keyword)` / `get_supplier(id)` | 只读 | 名称/品类/别名三处匹配；结果按交期排好序 |
 | logistics | `query_logistics(tracking_no)` / `list_in_transit()` | 只读 | 单笔给全轨迹；列表给摘要防撑爆上下文 |
 | procurement | `create_order(...)` / `get_order(id)` / `cancel_order(...)` | **写** | **确认闸门**（见下） |
@@ -126,14 +127,18 @@ LLM 做的**——如果问题问到"找谁补、几天到"，它才会去串第
 ### 1. inventory — 库存管家（servers/inventory_server.py）
 
 管 `data/inventory.json`：12 条 SKU，字段含仓库、数量、单位、安全线。
-你问"A003 还有多少"、"什么快用完了"，都是他的活。
+你问"A003 还有多少"、"什么快用完了"，都是他的活。**站 0 起多了支笔：
+货到签收入库（receive_goods）也是他的活**——货进的是他的仓库。
 
 | 工具 | 参数 | 返回 | 合同与要点 |
 |---|---|---|---|
 | `query_stock` | `sku`（必填，如 "A003"）；`warehouse`（可选，限定仓库，留空查全部） | 命中：该 SKU 完整记录；未命中：`"未找到 SKU xxx"` + **现有全部 SKU 编号清单** | 编号不分大小写；查不到不编数，还把菜单递给你引导换词重试 |
 | `list_low_stock` | 无 | 低于安全线的全部物料，**按缺口从大到小排序**；没有则明说 | "快用完了"的裁判是代码（`quantity < safety_stock`），不是 LLM 数感 |
+| `receive_goods` | `order_id`（必填）；`confirmed`（默认 **False**） | 闸门关：拒写 + 复述提示；闸门开：`{订单号, 状态=已收货, received_at, sku, received_quantity, stock_after}` | 同款确认闸门；只收"已下单"的单（已收货→幂等提示，已取消→拒，不存在→诚实"未找到"）；**跨账本写**：同时改 orders.json 和 inventory.json |
 
 验收实证：问"A003 还有多少"→ 答 46 个，还主动提醒低于安全线 100。
+站 0 实证："PO-2026-1001 的货到了，帮我签收入库"→ 复述要素问确认 →
+用户"确认" → A003 46→246，订单变已收货。
 
 ### 2. supplier — 供应商情报员（servers/supplier_server.py）
 
@@ -184,8 +189,11 @@ confirmed=true 重新调用"。LLM 由工具返回值教会守规矩——prompt
   下单找采购员——LLM 按工具 docstring 自己找到对的人（语义路由）。
 - **工具名自动带前缀**：挂载后叫 `inventory_query_stock`、`supplier_search_suppliers`
   ……多座 Server 同名工具不打架，命名空间白送。
-- **写权限收敛到一处**：全系统只有一个 Server 一支笔，盯防目标明确；
-  三个只读 Server 崩了顶多查不了，不会弄脏账。
+- **写权限按域划分**（站 0 升级）：原来是"一个 Server 一支笔"
+  （procurement 独占写），站 0 加收货入库后变成**"每域管自己的写"**——
+  下单/取消是采购域的活，收货入库是库存域的活（货进的是库存的仓库）。
+  代价是库存管家伸手改了采购账（orders.json）：**跨账本写**，埋下
+  半写/丢更新两案（见"生产化改造·站 0"），站 1 用事务治。
 
 ## 运行方法
 
@@ -212,6 +220,46 @@ python agent.py        # 空回车或 Ctrl+C 退出
 附加：①"我这边缺料了咋办"（无任何词表关键词）→ 语义直达 list_low_stock，
 LLM 语义路由 > FoodRAG 词表路由的活例子；②函数级单测 confirmed=False
 两个写工具都拒写。
+
+## 生产化改造：本机生产演练 → 云部署（六站路线）
+
+Mock 版通车后启动的生产化路线，主线是**先让旧设计的毛病暴露，再上新手段治它**：
+
+| 站 | 主题 | 治什么病 | 状态 |
+|---|---|---|---|
+| 0 | 业务闭环：收货入库 + eval 回归考卷 | 补业务缺口（在途单签收后库存不涨）；埋雷：JSON 跨账本写的半写/丢更新 | ✅ 2026-11-17 |
+| 1 | 数据层：JSON → SQLite | 站 0 两案结案：事务治半写，锁治丢更新；audit_log 起步 | |
+| 2 | 服务层：stdio → HTTP 常驻 | stdio 单机局限；API Key 认证 | |
+| 3 | 接口层：FastAPI Web + 服务端会话 | 终端 CLI → 浏览器聊天页 | |
+| 4 | 工程化：config 集中 / JSON 日志 / 锁版本 | 配置散、日志无链路、依赖飘 | |
+| 5 | 本机部署演练：Docker Compose | 一键起全家 + 卷持久化 | |
+| 6 | 云部署 | 前置清单（不含施工） | |
+
+### 站 0：业务闭环——收货入库 + eval 回归考卷（2026-11-17 全绿 ✅）
+
+**业务缺口**：PO-2026-1001 在途 200 个轴承，签收了库存却不涨——缺一把
+收货入库的工具。补上 `receive_goods`（住 inventory，合同与 create_order
+同款确认闸门），订单状态机从"已下单⇄已取消"两态长出第三态"已收货"。
+
+**写权限的域观念**：收货入库是库存域的活，所以工具住 inventory 而不是
+procurement——写权限从"一个 Server 一支笔"变成"每域管自己的写"。
+代价是**跨账本写**（inventory 伸手改 orders.json），由此故意埋下两案：
+
+1. **半写**：receive_goods 要写两次文件（先订单账后库存账），两写之间
+   崩 = 单收了货、库存没涨，两本账对不上（月底盘点才炸）。
+2. **丢更新**：两个收货员并发收同一 SKU，各自"读一份→改这份→存这份"
+   都没犯规，但后存的整份覆盖把先存的冲掉——期望 346 实际 246。
+
+两案在 `scripts/lost_update_demo.py` 可复现立案（跑在临时副本上，真账不动），
+**都是教学埋雷不是 bug**——站 1 换 SQLite 用事务+锁结案。
+
+**eval.py 回归考卷**（17 题全绿，不烧 LLM）：六连测的函数级等价（查询组
+①~⑨）+ 确认闸门（⑩~⑬，账本必须零变化）+ 写账组（⑭~⑰，含收货全链
+46→246→346 和状态边界）。隔离手法：临时目录账本副本 + monkeypatch 各
+Server 路径常量，跑完真账一字未动。惯例：每个真实 bug 进考卷当回归锚点。
+
+验收实录：eval 17 题全绿；CLI 端到端"下单→确认→收货→确认→查库存 246"
+两道闸门都灵（测完账本还原）；两案演示均可复现。
 
 ## 教学沉淀
 
