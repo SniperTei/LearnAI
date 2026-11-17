@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<!-- 供小链 Web 门脸（L3）——单文件聊天页，学 FoodRAG static/index.html 套路：
+     不引构建工具、不住 npm，一个文件 = 会话侧栏 + 聊天区 + trace 折叠。
+     会话住服务端（sessions.json），前端只报 session_id——刷新不丢（对照
+     FoodRAG 前端持历史的方案，见 web.py 模块注释）。 -->
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>供小链 · 供应链助手</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, "PingFang SC", sans-serif; background: #f4f5f7; color: #222;
+         display: flex; height: 100vh; }
+  /* ---- 会话侧栏 ---- */
+  #sidebar { width: 240px; background: #1e293b; color: #cbd5e1; padding: 14px;
+             display: flex; flex-direction: column; gap: 10px; flex-shrink: 0; }
+  #sidebar h1 { font-size: 16px; color: #fff; margin-bottom: 4px; }
+  #new-session { padding: 8px; border: none; border-radius: 6px; background: #2563eb;
+                 color: #fff; cursor: pointer; font-size: 13px; }
+  #new-session:hover { background: #1d4ed8; }
+  #session-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
+  .session-item { padding: 8px 10px; border-radius: 6px; cursor: pointer; font-size: 13px;
+                  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .session-item:hover { background: #334155; }
+  .session-item.active { background: #334155; color: #fff; }
+  .session-item .meta { font-size: 11px; color: #64748b; margin-top: 2px; }
+  /* ---- 主区 ---- */
+  #main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  #topbar { padding: 10px 18px; background: #fff; border-bottom: 1px solid #e2e8f0;
+            display: flex; align-items: center; gap: 10px; }
+  #topbar .dot { width: 8px; height: 8px; border-radius: 50%; background: #22c55e; }
+  #token-row { margin-left: auto; display: flex; gap: 6px; align-items: center; font-size: 12px; color: #64748b; }
+  #token { width: 180px; padding: 4px 8px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 12px; }
+  #chat { flex: 1; overflow-y: auto; padding: 20px; display: flex;
+          flex-direction: column; gap: 14px; }
+  .msg { max-width: 78%; padding: 10px 14px; border-radius: 12px; font-size: 14px;
+         line-height: 1.65; white-space: pre-wrap; word-break: break-word; }
+  .msg.user { align-self: flex-end; background: #2563eb; color: #fff; }
+  .msg.assistant { align-self: flex-start; background: #fff; border: 1px solid #e2e8f0; }
+  .msg.error { align-self: flex-start; background: #fef2f2; border: 1px solid #fecaca; color: #b91c1c; }
+  /* trace 折叠块（延续 trace 教学传统：调用工具/账本回复） */
+  details.trace { margin-top: 8px; font-size: 12px; color: #64748b; }
+  details.trace summary { cursor: pointer; user-select: none; }
+  details.trace .step { margin: 6px 0 0 0; padding: 6px 8px; background: #f8fafc;
+                        border-left: 3px solid #94a3b8; font-family: monospace;
+                        white-space: pre-wrap; word-break: break-all; }
+  #thinking { align-self: flex-start; color: #64748b; font-size: 13px;
+              padding: 8px 14px; background: #fff; border: 1px dashed #cbd5e1;
+              border-radius: 12px; display: none; }
+  /* ---- 输入区 ---- */
+  #input-row { padding: 14px 18px; background: #fff; border-top: 1px solid #e2e8f0;
+               display: flex; gap: 10px; }
+  #question { flex: 1; padding: 10px 14px; border: 1px solid #cbd5e1; border-radius: 10px;
+              font-size: 14px; resize: none; height: 46px; font-family: inherit; }
+  #send { padding: 0 22px; border: none; border-radius: 10px; background: #2563eb;
+          color: #fff; cursor: pointer; font-size: 14px; }
+  #send:disabled { background: #93c5fd; cursor: not-allowed; }
+</style>
+</head>
+<body>
+
+<div id="sidebar">
+  <h1>供小链</h1>
+  <button id="new-session">＋ 新会话</button>
+  <div id="session-list"></div>
+</div>
+
+<div id="main">
+  <div id="topbar">
+    <span class="dot"></span><span id="role-label">供应链智能助手（中间商模式）</span>
+    <div id="token-row">🔑 <input id="token" type="password" placeholder="WEB_API_TOKEN"></div>
+  </div>
+  <div id="chat"></div>
+  <div id="input-row">
+    <textarea id="question" placeholder="问点什么，比如：A003 还有多少？回车发送"></textarea>
+    <button id="send">发送</button>
+  </div>
+</div>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const chatEl = $("#chat");
+
+// ---- 钥匙：住 localStorage，刷新不丢（服务端校验，错了 401）----
+$("#token").value = localStorage.getItem("supply_token") || "";
+$("#token").onchange = () => localStorage.setItem("supply_token", $("#token").value);
+
+function headers() {
+  return { "Content-Type": "application/json",
+           "Authorization": "Bearer " + $("#token").value };
+}
+
+function assertToken() {
+  if (!$("#token").value) { alert("请先在右上角填 WEB_API_TOKEN（在项目 .env 里）"); return false; }
+  return true;
+}
+
+// ---- 会话管理 ----
+let currentSid = null;
+
+async function refreshSessions() {
+  const r = await fetch("/api/sessions", { headers: headers() });
+  if (!r.ok) return;
+  const list = await r.json();
+  const el = $("#session-list");
+  el.innerHTML = "";
+  for (const s of list.slice().reverse()) {  // 新的排前面
+    const div = document.createElement("div");
+    div.className = "session-item" + (s.id === currentSid ? " active" : "");
+    div.innerHTML = `${escapeHtml(s.title)}<div class="meta">${s.created_at.slice(0, 16)} · ${s.turns} 轮</div>`;
+    div.onclick = () => switchSession(s.id);
+    el.appendChild(div);
+  }
+}
+
+async function newSession() {
+  if (!assertToken()) return;
+  const r = await fetch("/api/sessions", { method: "POST", headers: headers() });
+  if (r.status === 401) { alert("Token 不对（401）"); return; }
+  const s = await r.json();
+  currentSid = s.id;
+  chatEl.innerHTML = "";
+  await refreshSessions();
+  $("#question").focus();
+}
+
+async function switchSession(sid) {
+  currentSid = sid;
+  chatEl.innerHTML = "";
+  const r = await fetch(`/api/sessions/${sid}/messages`, { headers: headers() });
+  if (r.ok) {
+    for (const m of await r.json()) renderMsg(m.role, m.content, m.trace, m.error);
+  }
+  await refreshSessions();
+}
+
+// ---- 渲染 ----
+function escapeHtml(s) {
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function renderMsg(role, content, trace, error) {
+  const div = document.createElement("div");
+  div.className = "msg " + (error ? "error" : role);
+  div.textContent = content;
+  // trace 折叠展示：工具调用 → 账本回复，一眼看清 LLM 干了什么
+  if (trace && trace.length) {
+    const d = document.createElement("details");
+    d.className = "trace";
+    d.innerHTML = `<summary>🔧 工具轨迹（${trace.length} 步）</summary>`;
+    for (const t of trace) {
+      const p = document.createElement("div");
+      p.className = "step";
+      p.textContent = `[调用工具] ${t.tool}(${JSON.stringify(t.args)})` +
+                      (t.result ? `\n[账本回复] ${t.result}` : "");
+      d.appendChild(p);
+    }
+    div.appendChild(d);
+  }
+  chatEl.appendChild(div);
+  chatEl.scrollTop = chatEl.scrollHeight;
+}
+
+// ---- 发送 ----
+let busy = false;
+
+async function send() {
+  if (busy || !assertToken()) return;
+  const q = $("#question").value.trim();
+  if (!q || !currentSid) { if (!currentSid) alert("请先点左侧「新会话」"); return; }
+  busy = true; $("#send").disabled = true;
+  $("#question").value = "";
+  renderMsg("user", q, null);
+  const think = $("#thinking") || document.createElement("div");
+  think.id = "thinking"; think.style.display = "block";
+  think.textContent = "正在想（查账/调工具中）…";
+  chatEl.appendChild(think); chatEl.scrollTop = chatEl.scrollHeight;
+
+  try {
+    const r = await fetch("/api/chat", {
+      method: "POST", headers: headers(),
+      body: JSON.stringify({ session_id: currentSid, message: q }),
+    });
+    if (r.status === 401) { alert("Token 不对（401）"); renderMsg("assistant", "（未发送成功：Token 无效）", [], true); }
+    else {
+      const data = await r.json();
+      renderMsg("assistant", data.answer, data.trace, data.error);
+    }
+  } catch (e) {
+    renderMsg("assistant", "（网络错误：" + e + "）", [], true);
+  } finally {
+    think.style.display = "none";
+    busy = false; $("#send").disabled = false;
+    await refreshSessions();
+    $("#question").focus();
+  }
+}
+
+$("#send").onclick = send;
+$("#question").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
+});
+$("#new-session").onclick = newSession;
+
+refreshSessions();
+</script>
+</body>
+</html>

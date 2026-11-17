@@ -241,6 +241,9 @@ APP_ROLE=seller python agent.py   # 只卖不买（卖手侧 + 核心）
 python servers/inventory_server.py --http        # 8101，ctrl+c 关
 MCP_TRANSPORT=inventory:http python agent.py     # inventory 走 HTTP，其余 stdio
 # MCP_TRANSPORT=inventory:http,sales:http        # 逗号分隔可多座
+
+# L3 Web：浏览器聊天页（.env 需 WEB_API_TOKEN，浏览器右上角填同款钥匙）
+python web.py                                   # → http://127.0.0.1:8000
 ```
 
 **APP_ROLE 挂载即开关**（需求 9：进货出货可选可拆）：角色只决定两件事——
@@ -279,7 +282,7 @@ LLM 语义路由 > FoodRAG 词表路由的活例子；②函数级单测 confirm
 | L0 | 业务闭环：收货入库 + eval 考卷 | 写工具闸门 / 回归考卷 / JSON 账本的坑 | ✅ 2026-11-17 |
 | L1 | 卖出闭环 + APP_ROLE | 长出新域（对称设计）/ 挂载即开关 | ✅ 2026-11-17 |
 | L2 | HTTP 常驻（**混合传输**） | 按座迁 stdio→HTTP / 生命周期对比 / kill 实验 | ✅ 2026-11-17 |
-| L3 | FastAPI Web | 浏览器聊天页 + 服务端会话 | ⬜ |
+| L3 | FastAPI Web | 浏览器聊天页 + 服务端会话 | ✅ 2026-11-17 |
 | L4 | 工程化 lite | config 集中 / 锁版本 / 日志 | ⬜ |
 | L5 | Docker Compose（毕业站） | 容器化部署 / 卷持久化 / healthcheck | ⬜ |
 
@@ -359,6 +362,36 @@ stdio 的供应商查询照常干活** → 重启 inventory 座 → 恢复。单
 验收实录：eval 26 题全绿；混合模式四连问全对（HTTP 座查库存/低库存 +
 stdio 座搜供应商/查物流）；`curl /health` 200、无 key POST 401、带 key 200；
 kill 实验三段全复现；纯 stdio（不设 MCP_TRANSPORT）复测不退化。
+
+### L3：FastAPI Web 接口 + 服务端会话（2026-11-17 全绿 ✅）
+
+**两个门脸一个后厨**：agent.py 抽出两个公共件——`build_agent(role)`
+（异步上下文管理器：进 MCPAdapter → list_tools → create_agent）和
+`run_turn(agent, history, question, on_event)`（单轮跑手：astream 截获
+trace，返回答案+新消息+trace）。CLI 的 main() 和 web.py 的 lifespan
+共用同一套；on_event 回调让 CLI 实时打印 trace、web 只收 JSON——
+同一个跑手，两种门脸。
+
+**服务端会话（与 FoodRAG 对照）**：FoodRAG 是前端持历史每次带回
+（服务端零状态）；本项目反着来——会话住服务端 `data/sessions.json`
+（gitignore，运行时账），前端只报 session_id，刷新/换设备不丢。
+**金鱼记忆**：喂 agent 只取最近 2 轮纯文本（user/assistant 成对），
+确认闸门跨一轮刚好够（Web 实测：下单复述→"确认"→落单，链路不断）；
+CLI 是终端学习场景才全量喂（含工具轨迹）。
+
+**两把钥匙**：`WEB_API_TOKEN`（外网门：浏览器→web.py）与
+`MCP_API_KEY`（内网门：web→MCP Server）分开——外网钥匙泄露换外网的，
+不用动内网。所有 `/api/*` 过 Bearer 校验，无 token 401。
+
+**其余教学点**：失败轮不进账（LLM 出错的轮次不写会话，避免半截
+对话污染下一轮上下文，同 CLI 纪律）；sessions.json 守读改存纪律 +
+asyncio 锁串行化对话轮（学习版并发答案，真药方在 supply_plan.md）；
+首问前 20 字自动当会话标题；trace 随 assistant 消息存档，回放可折叠。
+
+验收实录：eval 26 题全绿；Web 五连问全通（查库存 46+安全线提醒 →
+下单复述不写账 → "确认"落单 PO-2026-1003 → 取消复述 → "确认"取消）；
+双会话隔离（会话 2 对会话 1 的对话一无所知）；sessions.json 落盘可查
+（2 会话/标题/trace 齐全）；CLI 复测不退化（16 把工具照挂）。
 
 ## 教学沉淀
 

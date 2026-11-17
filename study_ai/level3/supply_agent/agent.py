@@ -23,10 +23,12 @@
 传输：MCP_TRANSPORT=inventory:http python agent.py（L2 混合传输——
       逗号分隔可多座，被点名的座走 HTTP 常驻，其余照旧 stdio 子进程；
       前提：被点名的座已自己 --http 跑起来，.env 里有 MCP_API_KEY）
+Web：python web.py（L3，浏览器聊天页；agent 构建走本文件 build_agent）
 """
 import asyncio
 import os
 import sys
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -146,6 +148,70 @@ def _short(text: str, limit: int = 160) -> str:
     return text if len(text) <= limit else text[:limit] + " …"
 
 
+def _plain(content) -> str:
+    """把消息 content 归一成纯文本（ToolMessage 的 content 是分块列表）"""
+    if isinstance(content, list):
+        return " ".join(p.get("text", "") for p in content if isinstance(p, dict))
+    return str(content)
+
+
+@asynccontextmanager
+async def build_agent(role: str = "trader"):
+    """公共件（L3 抽出）：进 MCPAdapter 上下文 → list_tools → create_agent。
+
+    【学徒注】CLI 的 main() 和 web.py 的 lifespan 都从这里拿 agent——
+    挂载、建模型、system prompt 只写一处，两个门脸共用一个后厨。
+    async with 进来的不只是 agent，还有它背着的 MCPAdapter 上下文
+    （stdio 子进程的生老病死都圈在里面），退出时统一收摊。
+    """
+    if role not in ROLE_SERVERS:
+        raise ValueError(f"未知角色 {role}（可选：{' / '.join(ROLE_SERVERS)}）")
+    server_names = ROLE_SERVERS[role]
+    async with MCPAdapter(build_mcp_config(server_names)) as adapter:
+        tools = await adapter.list_tools()
+        print(f"已挂载 MCP 工具（APP_ROLE={role}，{len(tools)} 把）：")
+        for t in tools:
+            print(f"  - {t.name}")
+        yield create_agent(build_model(), tools,
+                           system_prompt=build_system_prompt(role))
+
+
+async def run_turn(agent, history: list, question: str, on_event=None):
+    """公共件（L3 抽出）：跑一轮对话，返回 (答案, 新消息列表, trace)。
+
+    history 喂什么由调用方决定：CLI 喂全量 LangChain 消息对象（含工具轨迹，
+    LLM 能看见自己上轮调过什么工具）；web 喂最近 2 轮纯文本（金鱼记忆，
+    确认闸门跨一轮够用）——同一个跑手，两种记账策略。
+
+    on_event(kind, payload)：可选回调，事件发生时实时喊一嗓子——
+    CLI 传打印函数（trace 上屏），web 不传（只收返回的 trace 列表进 JSON）。
+    """
+    final_text = ""
+    new_msgs: list = []
+    trace: list = []
+    async for update in agent.astream(
+            {"messages": history + [{"role": "user", "content": question}]},
+            stream_mode="updates"):
+        for node_out in update.values():
+            for msg in node_out.get("messages", []):
+                new_msgs.append(msg)  # 收集本轮全部新消息，滚进历史
+                for tc in getattr(msg, "tool_calls", None) or []:
+                    entry = {"tool": tc["name"], "args": tc["args"]}
+                    trace.append(entry)
+                    if on_event:
+                        on_event("call", entry)
+                if getattr(msg, "type", "") == "tool":
+                    head = _short(_plain(msg.content), limit=200)
+                    if trace:
+                        trace[-1]["result"] = head  # 工具结果挂在它的调用后面
+                    if on_event:
+                        on_event("result", head)
+                # 不带 tool_calls 的 AIMessage = 收工轮，content 就是答案
+                if getattr(msg, "type", "") == "ai" and not getattr(msg, "tool_calls", None):
+                    final_text = _plain(msg.content)
+    return final_text, new_msgs, trace
+
+
 async def chat(agent, role: str, server_names: tuple) -> None:
     servers_desc = "/".join(server_names)
     print(f"供小链已上线（角色 {role}，{len(server_names)} 个 MCP Server：{servers_desc}）。空回车退出。")
@@ -154,6 +220,14 @@ async def chat(agent, role: str, server_names: tuple) -> None:
     # 上一轮复述的订单要素就断线了。这里每轮把历史 + 新问题一起喂进去，
     # 再把这轮产生的新消息（含工具调用记录）追加进历史。
     history: list = []
+
+    def _cli_event(kind: str, payload) -> None:
+        # CLI 的 trace 实时上屏（web 版走返回值，不走print）
+        if kind == "call":
+            print(f"\n  [调用工具] {payload['tool']}({payload['args']})")
+        else:
+            print(f"  [账本回复] {payload}")
+
     while True:
         try:
             question = input("\n你> ").strip()
@@ -163,25 +237,9 @@ async def chat(agent, role: str, server_names: tuple) -> None:
             break
 
         print("供小链>", end=" ", flush=True)
-        # astream + stream_mode="updates"：每步产出一次增量，
-        # 我们在这里截获 AIMessage 的 tool_calls（它要干什么）
-        # 和 ToolMessage 的结果（账本回了什么）——延续 trace 教学传统
-        final_text = ""
-        new_msgs: list = []
         try:
-            async for update in agent.astream(
-                    {"messages": history + [{"role": "user", "content": question}]},
-                    stream_mode="updates"):
-                for node_out in update.values():
-                    for msg in node_out.get("messages", []):
-                        new_msgs.append(msg)  # 收集本轮全部新消息，滚进历史
-                        for tc in getattr(msg, "tool_calls", None) or []:
-                            print(f"\n  [调用工具] {tc['name']}({tc['args']})")
-                        if getattr(msg, "type", "") == "tool":
-                            print(f"  [账本回复] {_short(str(msg.content))}")
-                        # 不带 tool_calls 的 AIMessage = 收工轮，content 就是答案
-                        if getattr(msg, "type", "") == "ai" and not getattr(msg, "tool_calls", None):
-                            final_text = msg.content
+            final_text, new_msgs, _trace = await run_turn(
+                agent, history, question, on_event=_cli_event)
         except Exception as e:
             print(f"\n[出错] {type(e).__name__}: {e}")
             continue
@@ -198,19 +256,12 @@ async def main() -> None:
     if role not in ROLE_SERVERS:
         print(f"[配置错误] 未知 APP_ROLE={role}（可选：trader / buyer / seller）")
         return
-    server_names = ROLE_SERVERS[role]
-    http_servers = _http_servers() & set(server_names)
+    http_servers = _http_servers() & set(ROLE_SERVERS[role])
     if http_servers:
         print(f"HTTP 常驻座：{'/'.join(sorted(http_servers))}（其余 stdio 子进程）")
 
-    async with MCPAdapter(build_mcp_config(server_names)) as adapter:
-        tools = await adapter.list_tools()
-        print(f"已挂载 MCP 工具（APP_ROLE={role}）：")
-        for t in tools:
-            print(f"  - {t.name}")
-        agent = create_agent(build_model(), tools,
-                             system_prompt=build_system_prompt(role))
-        await chat(agent, role, server_names)
+    async with build_agent(role) as agent:
+        await chat(agent, role, ROLE_SERVERS[role])
 
 
 if __name__ == "__main__":
