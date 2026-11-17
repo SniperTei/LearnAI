@@ -194,4 +194,11 @@ def outbound_goods(order_id: str, confirmed: bool = False) -> str:
 
 
 if __name__ == "__main__":
-    mcp.run(show_banner=False, log_level="ERROR")  # 默认 stdio 传输——由 agent.py 作为子进程拉起；关横幅和INFO日志，stderr留干净
+    import sys
+    if "--http" in sys.argv:
+        # 【学徒注】L2：HTTP 常驻模式（先迁本座——写 Server、跨账本写最重）。
+        # 端口 8101，与 agent.py 的 SERVER_PORTS 对齐
+        from http_entry import run_http
+        run_http(mcp, default_port=8101)
+    else:
+        mcp.run(show_banner=False, log_level="ERROR")  # stdio 默认：由 agent.py 作为子进程拉起；关横幅和INFO日志，stderr留干净

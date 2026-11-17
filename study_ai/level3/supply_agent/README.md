@@ -236,6 +236,11 @@ conda activate study_ai
 python agent.py                    # trader（默认）：中间商，六座全挂
 APP_ROLE=buyer python agent.py    # 只买不卖（买手侧 + 核心）
 APP_ROLE=seller python agent.py   # 只卖不买（卖手侧 + 核心）
+
+# L2 混合传输：先自己把某座 Server 跑成 HTTP 常驻（.env 需 MCP_API_KEY）
+python servers/inventory_server.py --http        # 8101，ctrl+c 关
+MCP_TRANSPORT=inventory:http python agent.py     # inventory 走 HTTP，其余 stdio
+# MCP_TRANSPORT=inventory:http,sales:http        # 逗号分隔可多座
 ```
 
 **APP_ROLE 挂载即开关**（需求 9：进货出货可选可拆）：角色只决定两件事——
@@ -273,7 +278,7 @@ LLM 语义路由 > FoodRAG 词表路由的活例子；②函数级单测 confirm
 |---|---|---|---|
 | L0 | 业务闭环：收货入库 + eval 考卷 | 写工具闸门 / 回归考卷 / JSON 账本的坑 | ✅ 2026-11-17 |
 | L1 | 卖出闭环 + APP_ROLE | 长出新域（对称设计）/ 挂载即开关 | ✅ 2026-11-17 |
-| L2 | HTTP 常驻（**混合传输**） | 按座迁 stdio→HTTP / 生命周期对比 / kill 实验 | ⬜ |
+| L2 | HTTP 常驻（**混合传输**） | 按座迁 stdio→HTTP / 生命周期对比 / kill 实验 | ✅ 2026-11-17 |
 | L3 | FastAPI Web | 浏览器聊天页 + 服务端会话 | ⬜ |
 | L4 | 工程化 lite | config 集中 / 锁版本 / 日志 | ⬜ |
 | L5 | Docker Compose（毕业站） | 容器化部署 / 卷持久化 / healthcheck | ⬜ |
@@ -324,6 +329,36 @@ docstring）② 客户品类匹配用整元素相等，"轴承"命中不了"深�
 验收实录：eval 26 题全绿；trader 端到端"卖给宝安五金 200 个 A004 →确认→
 SO-2026-2003 → 出库确认 → 2600→2400"；buyer 模式拒卖货 + 核心查询正常
 （测完账本还原）。
+
+### L2：HTTP 常驻·混合传输（2026-11-17 全绿 ✅）
+
+**混合而不是全家切换**：六座 Server 都长了 `--http` 入口（共用
+`servers/http_entry.py`：静态 Bearer 认证 + 自挂 `/health` + uvicorn），
+但 agent 按座点名谁走 HTTP——`MCP_TRANSPORT=inventory:http`（逗号分隔
+可多座，默认全 stdio）。mcpServers 配置表里 stdio 条目写 `command/args`、
+HTTP 条目写 `url + headers`，住同一张表互不打扰：**传输是每座 Server 自己
+的事，换传输只改配置不改业务代码**（协议标准化红利的活证明）。
+
+**生命周期两种并存**：stdio Server 是 agent 的孩子（agent 退出它跟着死），
+HTTP Server 是独立个体（自己起自己活，端口 8101~8106）。本站只迁
+inventory（写 Server、跨账本写最重，最配常驻），其余五座留 stdio——
+生产上没人一刀切全换，都是一座一座迁，本站排练的就是这个。
+
+**kill 实验（故障隔离眼见为实）**：会话中途杀掉 HTTP 的 inventory →
+查库存连续 MCPError（LLM 重试 4 次后如实告诉用户出错了）→ **同一会话里
+stdio 的供应商查询照常干活** → 重启 inventory 座 → 恢复。单崩单修，
+一座死不拖垮全家。
+
+**踩坑（fastmcp 4.2 实测）**：① 无内置静态 token 认证——自己 subclass
+`TokenVerifier`，`verify_token` 对上发 `AccessToken`、对不上返回 None
+（框架转 401）；② `AccessToken.scopes` 是必填字段，漏了直接 500；
+③ 无内置 `/health`（404）——`mcp.http_app()` 返回 Starlette app，
+路由表自己 append；④ 配置校验的 transport 字面量是连字符
+`streamable-http`，写下划线 `streamable_http` 直接 pydantic 报错。
+
+验收实录：eval 26 题全绿；混合模式四连问全对（HTTP 座查库存/低库存 +
+stdio 座搜供应商/查物流）；`curl /health` 200、无 key POST 401、带 key 200；
+kill 实验三段全复现；纯 stdio（不设 MCP_TRANSPORT）复测不退化。
 
 ## 教学沉淀
 
@@ -434,7 +469,7 @@ async with MCPAdapter(config) as adapter:
   （踩坑实录第 3 条）。
 
 **上生产的脑子**：本地 stdio 换远程 HTTP——config 从 `command/args` 换成
-`{"url": "https://...", "transport": "streamable_http"}`，Server 常驻运行，
+`{"url": "https://...", "transport": "streamable-http"}`，Server 常驻运行，
 再加认证头。接入代码只改 config 不改逻辑，这就是协议标准化的红利。
 
 ### ④ 调试：分层定位

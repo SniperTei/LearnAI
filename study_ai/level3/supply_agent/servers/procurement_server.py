@@ -129,4 +129,9 @@ def cancel_order(order_id: str, confirmed: bool = False) -> str:
 
 
 if __name__ == "__main__":
-    mcp.run(show_banner=False, log_level="ERROR")  # 关横幅和INFO日志，stderr也留干净
+    import sys
+    if "--http" in sys.argv:
+        from http_entry import run_http
+        run_http(mcp, default_port=8104)  # 端口与 agent.py 的 SERVER_PORTS 对齐
+    else:
+        mcp.run(show_banner=False, log_level="ERROR")  # stdio 默认：agent 子进程；stderr留干净

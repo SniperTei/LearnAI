@@ -20,6 +20,9 @@
 
 运行：conda activate study_ai && python agent.py
 角色：APP_ROLE=buyer python agent.py（trader/buyer/seller，默认 trader）
+传输：MCP_TRANSPORT=inventory:http python agent.py（L2 混合传输——
+      逗号分隔可多座，被点名的座走 HTTP 常驻，其余照旧 stdio 子进程；
+      前提：被点名的座已自己 --http 跑起来，.env 里有 MCP_API_KEY）
 """
 import asyncio
 import os
@@ -56,17 +59,65 @@ ROLE_BUSINESS = {
     "seller": "本公司只销售不采购——不从任何供应商进货，用户要采购时礼貌说明本公司不做采购。",
 }
 
+# 各座 HTTP 端口（与 servers/http_entry.py 的默认端口必须一致，改要两边改）
+SERVER_PORTS = {
+    "inventory": 8101, "supplier": 8102, "logistics": 8103,
+    "procurement": 8104, "customer": 8105, "sales": 8106,
+}
+
+
+def _http_servers() -> set:
+    """解析 MCP_TRANSPORT=inventory:http,sales:http → {"inventory", "sales"}
+
+    【学徒注】L2 混合传输的机关：默认 stdio（agent 当子进程拉起，用完即走），
+    被点名的座改走 HTTP 常驻（跨进程共享、可独立重启、可跨机）。
+    两边对 LLM 完全透明——挂到的都是同一批工具，名片一字不差，
+    这就是协议标准化的红利：换传输只改配置，不改任何业务代码。
+    """
+    raw = os.environ.get("MCP_TRANSPORT", "").strip()
+    http = set()
+    for item in filter(None, (p.strip() for p in raw.split(","))):
+        name, sep, mode = item.partition(":")
+        if sep and mode.strip() == "http":
+            http.add(name.strip())
+    return http
+
 
 def build_mcp_config(server_names: tuple) -> dict:
-    """按角色挑 Server 生成挂载配置（挂载即开关的唯一机关）"""
-    # 【学徒注】关键坑：command 必须用 sys.executable（当前解释器的绝对路径），
-    # 不能写裸 "python"——MCP Server 是子进程，裸 "python" 由 PATH 说了算，
-    # 容易飘到系统 Python（那里没装 mcp 包，子进程秒死还难排查）
-    return {"mcpServers": {
-        name: {"command": sys.executable,
-               "args": [str(BASE_DIR / "servers" / f"{name}_server.py")],
-               "transport": "stdio"}
-        for name in server_names}}
+    """按角色挑 Server 生成挂载配置（挂载即开关的唯一机关）。
+
+    传输按座自选（L2）：MCP_TRANSPORT 点名的座走 HTTP url + Bearer 认证头，
+    其余照旧 stdio 子进程。"""
+    http_servers = _http_servers()
+    if http_servers:
+        api_key = os.environ.get("MCP_API_KEY")
+        if not api_key:
+            # fail fast：HTTP 座的钥匙没有 = 连不上还不明所以，不如当场报清
+            sys.exit("[配置错误] MCP_TRANSPORT 点了 HTTP 座，但 .env 里没有 MCP_API_KEY")
+        unknown = http_servers - set(SERVER_PORTS)
+        if unknown:
+            sys.exit(f"[配置错误] MCP_TRANSPORT 里没有这座 Server：{', '.join(sorted(unknown))}")
+
+    servers = {}
+    for name in server_names:
+        if name in http_servers:
+            # 【学徒注】HTTP 形态：url 指向常驻进程 + 认证头带钥匙。
+            # 和 stdio 条目住同一张配置表——MCPAdapter 只认配置不认传输方式
+            servers[name] = {
+                "url": f"http://127.0.0.1:{SERVER_PORTS[name]}/mcp",
+                # 【学徒注】踩坑：fastmcp 配置校验要连字符 "streamable-http"，
+                # 下划线 "streamable_http" 直接 pydantic 报 literal_error
+                "transport": "streamable-http",
+                "headers": {"Authorization": f"Bearer {os.environ['MCP_API_KEY']}"},
+            }
+        else:
+            # 【学徒注】关键坑：command 必须用 sys.executable（当前解释器的
+            # 绝对路径），不能写裸 "python"——MCP Server 是子进程，裸 "python"
+            # 由 PATH 说了算，容易飘到系统 Python（那里没装 mcp 包，子进程秒死还难排查）
+            servers[name] = {"command": sys.executable,
+                             "args": [str(BASE_DIR / "servers" / f"{name}_server.py")],
+                             "transport": "stdio"}
+    return {"mcpServers": servers}
 
 
 def build_system_prompt(role: str) -> str:
@@ -148,6 +199,9 @@ async def main() -> None:
         print(f"[配置错误] 未知 APP_ROLE={role}（可选：trader / buyer / seller）")
         return
     server_names = ROLE_SERVERS[role]
+    http_servers = _http_servers() & set(server_names)
+    if http_servers:
+        print(f"HTTP 常驻座：{'/'.join(sorted(http_servers))}（其余 stdio 子进程）")
 
     async with MCPAdapter(build_mcp_config(server_names)) as adapter:
         tools = await adapter.list_tools()
