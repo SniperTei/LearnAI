@@ -21,6 +21,86 @@ agent.py（乙方/客户端，LangChain create_agent + qwen3.7-flash）
 Server 现读账本 → 结果原路返回 → LLM 组织答案。**Agent 从头到尾没碰过
 JSON 文件**——数据只能从工具过，这就是 MCP 的甲乙方合同。
 
+## 一次调用的完整回路：查库存 + 给采购建议
+
+拿验收第 1 测的扩展版走全程：**"A003 还有多少？要不要补点货？"**
+分两个阶段：开机挂载（只发生一次）+ 一次问答的六步回路。
+
+### 阶段〇：开机挂载（agent.py 启动时，只发生一次）
+
+```
+async with MCPAdapter(config) as adapter:
+```
+
+1. 按配置拉起 4 个子进程（`sys.executable servers/xxx_server.py`），
+   各开一根 stdio 管道
+2. 每根管道先完成 MCP 握手：客户端发 `initialize` → Server 应答 →
+   再发 `tools/list` → Server 把 9 把工具的**说明书**（工具名 + docstring +
+   参数类型生成的 JSON Schema）递回来
+3. `adapter.list_tools()` 把它们变成 LangChain 工具，喂给 `create_agent`
+
+从此 LLM 的世界里多了 9 张"名片"——**它没见过函数代码，只见过说明书**。
+
+### 阶段一：一次问答的六步回路
+
+```
+你> A003 还有多少？要不要补点货？
+│
+▼ ①组包
+agent.py: history + 新问题 → {"messages": [...]} 交给 agent.astream
+│
+▼ ②LLM 第一醒（想）
+qwen3.7-flash 收到：system prompt(供小链人设+规则) + 历史 + 问题 + 9张工具名片
+输出：AIMessage(tool_calls=[{name:"inventory_query_stock", args:{sku:"A003"}}])
+│    ← 这是语义路由：docstring 里写着"查询库存余量"，跟问题对上了
+│      （FoodRAG 要背词表，这里 LLM 自己认路）
+▼ ③过管道（做）—— MCP 协议本体，就这一下
+MCPAdapter 把调用序列化成 JSON-RPC，写进子进程的 stdin：
+┌─────────────────────────────────────────────────┐
+│ {"jsonrpc":"2.0","id":7,"method":"tools/call",  │
+│  "params":{"name":"query_stock",                │
+│            "arguments":{"sku":"A003"}}}         │
+└─────────────────────────────────────────────────┘
+inventory_server.py 从 stdin 收到帧 → FastMCP 派发给 query_stock 函数
+→ 现读 data/inventory.json（无状态，每次现翻账）
+→ 找到 A003：46 个，安全线 100
+→ 结果从 stdout 原路写回（JSON-RPC 响应帧）
+│
+▼ ④回填（看）
+MCPAdapter 读到响应 → 包成 ToolMessage 塞回消息列表
+   （终端上看到的两行 trace 就是这两个时刻：
+    [调用工具] inventory_query_stock({'sku':'A003'})
+    [账本回复] [{"sku":"A003",...,"quantity":46,"safety_stock":100,...}]）
+│
+▼ ⑤LLM 第二醒（再想）
+LLM 看到 46 < 100：
+  - 要"补货建议"就再发一轮工具调用，比如 supplier_search_suppliers("轴承")
+    → 重复 ③④ → 拿到华精 7 天交期   ← 轮数由依赖决定（L3 老课）
+  - 或者素材够了就直接收工
+输出：不带 tool_calls 的 AIMessage = 收工轮，content 就是最终答案
+│
+▼ ⑥上桌
+agent.py 打印答案；history.extend(本轮全部新消息) —— 下一轮"确认"才有记忆
+```
+
+实际答出来的样子（验收实录）：
+
+> A003（深沟球轴承 6204）五金仓余量 **46 个**。
+> ⚠️ 安全线 100 个，已低于安全线，建议尽快补货。
+
+"建议补货"这半句值得盯一眼：**工具只回了数字，"46<100 该补"这个判断是
+LLM 做的**——如果问题问到"找谁补、几天到"，它才会去串第二把工具。
+
+### 三条主干结论
+
+1. **一次工具调用 = 一根管道上一个来回**（JSON-RPC 请求帧进 stdin，
+   响应帧出 stdout），N 把工具就是 N 个来回；ReAct 循环 = 想→做→看
+   转几圈直到收工轮
+2. **Agent 全程没碰过 JSON 文件**——数据只能从工具返回值这条门过，
+   这就是甲乙方合同
+3. **LLM 认工具靠 docstring，选哪把工具靠语义**——docstring 是对外 API，
+   写得含糊 LLM 就走错门
+
 ## MCP 能力清单（三能力，本项目只用第一个）
 
 | 能力 | 是什么 | 本项目 |
@@ -37,6 +117,75 @@ JSON 文件**——数据只能从工具过，这就是 MCP 的甲乙方合同�
 | supplier | `search_suppliers(keyword)` / `get_supplier(id)` | 只读 | 名称/品类/别名三处匹配；结果按交期排好序 |
 | logistics | `query_logistics(tracking_no)` / `list_in_transit()` | 只读 | 单笔给全轨迹；列表给摘要防撑爆上下文 |
 | procurement | `create_order(...)` / `get_order(id)` / `cancel_order(...)` | **写** | **确认闸门**（见下） |
+
+## 四座 MCP Server 详介
+
+上面是总表，这里逐座展开：每座 Server 就是一位管账的师傅，工具是他的手艺，
+合同写在 docstring 里。**前三位只读（账房先生，只翻账不动笔），第四位带笔（唯一的写手）**。
+
+### 1. inventory — 库存管家（servers/inventory_server.py）
+
+管 `data/inventory.json`：12 条 SKU，字段含仓库、数量、单位、安全线。
+你问"A003 还有多少"、"什么快用完了"，都是他的活。
+
+| 工具 | 参数 | 返回 | 合同与要点 |
+|---|---|---|---|
+| `query_stock` | `sku`（必填，如 "A003"）；`warehouse`（可选，限定仓库，留空查全部） | 命中：该 SKU 完整记录；未命中：`"未找到 SKU xxx"` + **现有全部 SKU 编号清单** | 编号不分大小写；查不到不编数，还把菜单递给你引导换词重试 |
+| `list_low_stock` | 无 | 低于安全线的全部物料，**按缺口从大到小排序**；没有则明说 | "快用完了"的裁判是代码（`quantity < safety_stock`），不是 LLM 数感 |
+
+验收实证：问"A003 还有多少"→ 答 46 个，还主动提醒低于安全线 100。
+
+### 2. supplier — 供应商情报员（servers/supplier_server.py）
+
+管 `data/suppliers.json`：6 家供应商，字段含品类、交期、评级、价格档、
+联系方式、**别名**（学 FoodRAG 锁菜别名："华精"也能找到"华精轴承制造"）。
+
+| 工具 | 参数 | 返回 | 合同与要点 |
+|---|---|---|---|
+| `search_suppliers` | `keyword`（必填） | 命中：匹配列表**按交期从短到长排好**；未命中：`"未找到"` + **现有全部品类清单** | 关键词三处匹配：名称 / 品类 / 别名；排序在代码里做——"交期最短是谁"这类问题 LLM 拿到第一行就是答案，不给它排序出错的机会 |
+| `get_supplier` | `supplier_id`（必填，如 "SUP-001"） | 单家完整档案（含联系方式）；未命中明说 | 下单前核实供应商身份用它 |
+
+验收实证："谁家供轴承？交期最短的是哪家"→ 一发命中两家，华精 7 天排榜首。
+
+### 3. logistics — 物流追踪员（servers/logistics_server.py）
+
+管 `data/logistics.json`：4 张运单，含轨迹事件流（时间/地点/描述）、
+状态（在途/派送中/已签收）、ETA。
+
+| 工具 | 参数 | 返回 | 合同与要点 |
+|---|---|---|---|
+| `query_logistics` | `tracking_no`（必填，如 "LG-2026-0001"） | 单笔全量：状态 + 起讫地 + ETA + **完整轨迹事件**；未命中：`"未找到"` + 现有运单号清单 | 快递查询的本质是事件流，按时间正序原样给 |
+| `list_in_transit` | 无 | 所有未签收运单的**七字段摘要**（截掉轨迹全文），按 ETA 从早到晚排 | 单查给全文、列表给摘要——防几十条轨迹撑爆 LLM 上下文 |
+
+验收实证："LG-2026-0001 到哪了"→ 广州分拨中心 + ETA 11-19。
+
+### 4. procurement — 采购员（servers/procurement_server.py，唯一带笔的）
+
+管 `data/orders.json`：采购订单账。**三件套里唯一会写文件的 Server**，
+所以也是唯一设闸门的。
+
+| 工具 | 参数 | 返回 | 合同与要点 |
+|---|---|---|---|
+| `create_order` | `supplier_id`、`sku`、`quantity`（必填）；`confirmed`（默认 **False**） | 闸门关：拒写 + 复述要素提示；闸门开：新订单完整记录 | **确认闸门**见下；写前先验证供应商和 SKU 真实存在（防幻觉进账本）；发号 `PO-2026-100x` 取最大号 +1 |
+| `get_order` | `order_id`（必填） | 单笔订单详情；未命中明说 | 查单免费随便调 |
+| `cancel_order` | `order_id`（必填）；`confirmed`（默认 **False**） | 闸门关：拒写 + 复述提示；闸门开：状态改"已取消" | 与 create 同一道闸；已取消的单再取消 → 诚实说"已经是已取消状态"，幂等不重复动账 |
+
+**确认闸门**（本项目安全链，住工具内不住 prompt）：`confirmed=False` 时
+绝不写账，返回"请先向用户复述供应商/品名/数量并取得明确同意，再带
+confirmed=true 重新调用"。LLM 由工具返回值教会守规矩——prompt 是请求，
+闸门是物理锁。
+
+验收实证：下单 → 先复述要素问确认 → 用户"确认" → 才真正写账
+（PO-2026-1003）；取消同款流程。
+
+### 四座合起来的分工美学
+
+- **一域一 Server 一账本**：库存问管家、供应商问情报员、物流问追踪员、
+  下单找采购员——LLM 按工具 docstring 自己找到对的人（语义路由）。
+- **工具名自动带前缀**：挂载后叫 `inventory_query_stock`、`supplier_search_suppliers`
+  ……多座 Server 同名工具不打架，命名空间白送。
+- **写权限收敛到一处**：全系统只有一个 Server 一支笔，盯防目标明确；
+  三个只读 Server 崩了顶多查不了，不会弄脏账。
 
 ## 运行方法
 
@@ -92,6 +241,139 @@ MCP Server 是子进程。裸 `"python"` 由 PATH 说了算，容易飘到系统
 - **create_agent 不记对话历史**：用户说"确认"时它失忆 → agent.py 手动累积
   history 每轮全量喂（同 FoodRAG 金鱼记忆一课：模型无状态，账要自己记）
 - **stdio 传输时 stdout 是协议通道**，Server 里绝不能 print() 调试
+
+## MCP 落地全流程：设计 → 开发 → 接入 → 调试 → 测试 → 上线
+
+把本项目亲手趟过的路整理成方法论。每个阶段两栏：**本项目怎么做的**（活例子）
+和 **上生产要换的脑子**（Mock 与真实的差距在哪）。
+
+| 阶段 | 一句话 | 本项目活例子 | 上生产升级点 |
+|---|---|---|---|
+| ① 设计 | 甲方想清楚卖什么能力 | 4 本账 → 4 个 Server，9 把工具读写分离 | 能力清单评审：谁可调用、限流多少 |
+| ② 开发 | Server 侧把工具写好 | FastMCP `@tool()`，docstring 即合同 | 真数据库、并发锁、事务 |
+| ③ 接入 | 客户端挂载 + 教 LLM 规矩 | MCPAdapter config + system prompt | 远程 HTTP 接入 + 认证 |
+| ④ 调试 | 分层定位：Server 单练还是合练出问题 | trace 两行打印 + 哈希比对 | Inspector + 日志链路追踪 |
+| ⑤ 测试 | 函数级 → 端到端 → 彩蛋 | 闸门单测 + 六连测 + 语义路由 | 回归考卷 + CI 每次必跑 |
+| ⑥ 上线 | 本地子进程 → 常驻服务 | stdio 拉起 4 个子进程 | HTTP Server + 监控 + 版本化 |
+
+### ① 设计：甲方想清楚卖什么能力
+
+**先定能力，再写代码。** 三个决策按顺序做：
+
+1. **能力选型**：MCP 三能力（Tools/Resources/Prompts）里卖哪个？
+   本项目只卖 Tools——LLM 要的是"帮我查/帮我办"，不是"给我看文件"。
+2. **切 Server**：按业务域切，一域一 Server 一账本。库存/供应商/物流/采购
+   四个域天然独立，单崩单修，将来单独替换任何一个都不惊动别人。
+3. **每把工具的合同**，五问定死：
+   - 读还是写？（读随便调；写要过闸门——读写分离是第一道安全线）
+   - 参数是什么类型？（`sku: str`、`quantity: int`——类型即合同，LLM 照 schema 填空）
+   - 查不到返回什么？（诚实说"未找到"，绝不编——防幻觉从工具层做起）
+   - 写之前要什么手续？（确认闸门：`confirmed=False` 拒写并说明补救路径）
+   - 返回多少？（列表给摘要防撑爆上下文，详情走单查——logistics 的设计）
+
+**上生产的脑子**：加两问——这工具谁有权调？（认证授权）调疯了怎么办？（限流、
+审计日志）。写工具的闸门从"复述确认"可能要升级为"审批流"（下单超 1 万元
+走人工审批）。
+
+### ② 开发：Server 侧把工具写好
+
+```python
+mcp = FastMCP("inventory")          # 一个 Server 一个身份
+
+@mcp.tool()
+def query_stock(sku: str, ...) -> str:
+    """docstring 就是给 LLM 看的说明书"""  # 什么时候调、参数含义、合同条款
+    ...                                # 函数体：读账 → 加工 → 返回
+```
+
+铁律四条（全部本项目实证）：
+- **docstring 即合同**：LLM 只看函数签名 + docstring 决定怎么用你。写不清
+  等于合同有歧义，甲乙方迟早扯皮（确认闸门的条款就写在 docstring 里）。
+- **stdout 是协议通道**（stdio 传输下），调试信息只能走 stderr。
+- **写账纪律**：读一份 → 改这份 → 存这份；写前先验证外键真实存在
+  （供应商/SKU 不存在就拒单，防幻觉进账本）。
+- **无状态**：每次现读账本，Server 随便重启不失忆——代价是磁盘 IO，
+  换鲁棒，值。
+
+**上生产的脑子**：JSON 账本换成真数据库（并发写靠锁/事务，两个订单同时
+发号不会撞号）；"无状态现读"在大流量下升级为"缓存 + 失效策略"。
+
+### ③ 接入：客户端挂载 + 教 LLM 规矩
+
+两件事，一件对协议，一件对模型：
+
+```python
+config = {"mcpServers": {
+    "inventory": {"command": sys.executable,   # 防环境飘移，见教学沉淀 4
+                  "args": [".../inventory_server.py"],
+                  "transport": "stdio"}}}
+async with MCPAdapter(config) as adapter:
+    tools = await adapter.list_tools()          # 9 把工具到手
+    agent = create_agent(model, tools, system_prompt=SYSTEM_PROMPT)
+```
+
+- **协议侧**：MCPConfig 描述怎么拉起/连上每个 Server；`list_tools()` 拿到的
+  工具名自动带前缀（`inventory_query_stock`）——多 Server 同名工具不打架，
+  命名空间白送。
+- **模型侧**：system prompt 教规矩（人设 + 判单规则 + "下单必须先取得同意"）。
+  工具 docstring 管"这把工具怎么用"，system prompt 管"整个公司怎么运转"，
+  两层各管各的。
+- **历史自己记**：create_agent 不记上一轮，对话历史手动累积每轮全量喂
+  （踩坑实录第 3 条）。
+
+**上生产的脑子**：本地 stdio 换远程 HTTP——config 从 `command/args` 换成
+`{"url": "https://...", "transport": "streamable_http"}`，Server 常驻运行，
+再加认证头。接入代码只改 config 不改逻辑，这就是协议标准化的红利。
+
+### ④ 调试：分层定位
+
+MCP 项目出问题，先分清是哪一层的锅，别一锅炖：
+
+| 层 | 症状 | 手段 |
+|---|---|---|
+| Server 本身 | 工具逻辑错/账读错 | 脱离 agent 单测：直接 import 调函数（闸门单测就这么跑的） |
+| 协议层 | 子进程秒死/工具列表空 | 单独 `python servers/xxx_server.py` 看报错；查 sys.executable；官方 Inspector 可视化手动调工具 |
+| 接入层 | 工具在但 LLM 不调/调错 | 看 agent.py 的 trace（调用工具/账本回复两行），对照 system prompt |
+| 依赖层 | 装完包别的项目坏了 | starlette 案：装新包前后 `pip check`，版本冲突当场发现 |
+
+trace 是主力：每轮打印 `[调用工具] 名(参数)` 和 `[账本回复]`，LLM 选错了
+工具、参数填错了、Server 返回了拒绝，一行看穿。
+
+**上生产的脑子**：请求 ID 链路追踪（一次对话穿过多层，日志要能串起来）；
+Server 进程崩溃自动重启 + 告警。
+
+### ⑤ 测试：三层金字塔
+
+1. **函数级单测**（快、免费）：直接调工具函数验合同——`confirmed=False`
+   必须拒写、查不存在的 SKU 必须说未找到。不烧 LLM。
+2. **端到端验收**（慢、烧 token，但必须跑）：真实对话走全链路，六连测就是
+   这层——重点测**行为**而不是字句（"必须先复述订单要素问确认"）。
+3. **彩蛋/边界测试**：语义路由（无关键词措辞）、恶意/误操作（对已取消的
+   单再取消一次）。
+
+**惯例**（学 FoodRAG eval.py）：每个真实 bug 进考卷当回归锚点，改完代码
+必跑全卷。
+
+**上生产的脑子**：考卷进 CI，每次改 Server 自动跑函数级，端到端抽样跑。
+
+### ⑥ 生产上线：本地子进程 → 常驻服务
+
+本项目形态：**本地 stdio**——agent 拉起子进程，同机管道通信。
+安全靠两道：确认闸门（协议内的锁）+ 本地进程（协议外的墙，外人根本连不上）。
+
+上生产逐项换血：
+
+| 本项目（Mock） | 生产版 |
+|---|---|
+| stdio 子进程，agent 开机拉起 | HTTP 常驻服务（streamable_http），运维独立部署扩容 |
+| 谁都能调（本机即权限） | 认证授权（API key / OAuth），按角色限工具 |
+| JSON 文件账本 | 数据库 + 事务 + 备份 |
+| 写前复述确认 | 审批流 + 审计日志（谁在何时下了什么单） |
+| print 大法 trace | 结构化日志 + 监控大盘 + 告警 |
+| 工具 schema 随便改 | **版本化**：schema 变更 = 合同变更，老客户端要兼容期 |
+
+最后一行最容易踩：工具的参数/返回一改，所有挂载它的 Agent 端同时受影响——
+**Server 的 docstring 不是注释，是对外 API**。
 
 ## 谱系对照（这个项目站在哪些前人的肩膀上）
 
