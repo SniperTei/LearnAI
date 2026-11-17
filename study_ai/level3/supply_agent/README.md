@@ -283,7 +283,7 @@ LLM 语义路由 > FoodRAG 词表路由的活例子；②函数级单测 confirm
 | L1 | 卖出闭环 + APP_ROLE | 长出新域（对称设计）/ 挂载即开关 | ✅ 2026-11-17 |
 | L2 | HTTP 常驻（**混合传输**） | 按座迁 stdio→HTTP / 生命周期对比 / kill 实验 | ✅ 2026-11-17 |
 | L3 | FastAPI Web | 浏览器聊天页 + 服务端会话 | ✅ 2026-11-17 |
-| L4 | 工程化 lite | config 集中 / 锁版本 / 日志 | ⬜ |
+| L4 | 工程化 lite | config 集中 / 锁版本 / 日志 | ✅ 2026-11-17 |
 | L5 | Docker Compose（毕业站） | 容器化部署 / 卷持久化 / healthcheck | ⬜ |
 
 ### L0（原站 0）：收货入库 + eval 考卷（2026-11-17 全绿 ✅）
@@ -392,6 +392,32 @@ asyncio 锁串行化对话轮（学习版并发答案，真药方在 supply_plan
 下单复述不写账 → "确认"落单 PO-2026-1003 → 取消复述 → "确认"取消）；
 双会话隔离（会话 2 对会话 1 的对话一无所知）；sessions.json 落盘可查
 （2 会话/标题/trace 齐全）；CLI 复测不退化（16 把工具照挂）。
+
+### L4：工程化 lite（2026-11-17 全绿 ✅）
+
+**config.py 配置集中**：所有"从环境读东西"只住一个文件——路径
+（DATA_DIR/LOG_DIR/SESSIONS_FILE）、角色（APP_ROLE）、传输开关
+（MCP_TRANSPORT）都是常量，密钥走 `require_secret()`（缺钥匙
+fail fast，把缺的一次报全，别一把一把挤牙膏）。之前 load_dotenv
+散在 agent/web/http_entry 三处各写一遍——改一处忘两处的温床。
+
+**两份工程文件**：`.env.example` 进库当模板（真 .env 继续 gitignore，
+新人 cp 一份填钥匙就能起）；`requirements.txt` 实测版本钉死
+（langchain 1.4.6 / fastmcp 4.2.0 / fastapi 0.121.3 / uvicorn 0.38.0，
+**starlette<0.51 红线**写进注释——fastmcp 想抬到 1.x 会弄坏 fastapi）。
+
+**JSON 行日志**：`logs/web.log`（web 一份）+ `logs/mcp_<名>.log`
+（每座 HTTP Server 一份）。web 侧经 L3 埋的 `on_event` 回调长成
+日志管线：`chat_start → tool_call → tool_result（带 duration_ms）→
+chat_end`，每行带 session_id——`grep <session_id> logs/web.log`
+一条命令串起一次对话的全链。MCP 侧 uvicorn 访问日志同款 JSON
+格式（谁来了/什么状态/建了哪个会话）。给机器读的账（对账/排查）
+和给人看的 CLI print trace 两不耽误。
+
+验收实录：eval 26 题全绿；`python web.py` 一键起（日志目录自动建）；
+grep session_id 串全链（chat_start/tool_call 38ms/chat_end 6581ms）；
+MCP HTTP 座日志落盘（health 200/带 key 200/无 key 401 全记录）；
+CLI 复测不退化；fail fast 冒烟（缺钥匙当场退出并指路 .env.example）。
 
 ## 教学沉淀
 

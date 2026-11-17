@@ -31,13 +31,13 @@ import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from dotenv import load_dotenv
 from langchain.agents import create_agent
 from langchain.mcp import MCPAdapter
 from langchain_openai import ChatOpenAI
 
-BASE_DIR = Path(__file__).resolve().parent
-load_dotenv(BASE_DIR / ".env")  # DASHSCOPE_API_KEY，学 FoodRAG
+import config
+
+BASE_DIR = config.BASE_DIR  # 路径/钥匙集中读在 config.py（L4）
 
 # 角色分组（需求 9 的架构落地）：
 CORE = ("inventory", "logistics")            # 中间环节：仓库（双向写）+ 物流
@@ -166,6 +166,7 @@ async def build_agent(role: str = "trader"):
     """
     if role not in ROLE_SERVERS:
         raise ValueError(f"未知角色 {role}（可选：{' / '.join(ROLE_SERVERS)}）")
+    config.require_secret("DASHSCOPE_API_KEY")  # L4：缺钥匙开饭前就报，别等挂完 Server 才炸
     server_names = ROLE_SERVERS[role]
     async with MCPAdapter(build_mcp_config(server_names)) as adapter:
         tools = await adapter.list_tools()

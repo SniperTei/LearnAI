@@ -1,3 +1,14 @@
-langchain[mcp]>=1.4.0
-langchain-openai
-python-dotenv
+# requirements.txt — 实测版本钉死（L4）：学习环境跑通的组合原样冻住
+# 装完规矩：pip install -r requirements.txt && pip check
+
+langchain[mcp]==1.4.6
+langchain-openai==1.6.6
+fastmcp==4.2.0
+fastapi==0.121.3
+uvicorn==0.38.0
+python-dotenv==1.2.1
+
+# 【红线】starlette 必须压在 0.51 以下：
+# fastmcp 会想把 starlette 抬到 1.x，直接弄坏 fastapi（FoodRAG web.py 实测翻过车）。
+# 装任何新包后跑 pip check + fastapi 冒烟，冲突当场发现。
+starlette<0.51

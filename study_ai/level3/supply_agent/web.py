@@ -31,29 +31,58 @@
 """
 import asyncio
 import json
+import logging
 import os
 import sys
+import time
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime
-from pathlib import Path
 
-from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+import config
 from agent import build_agent, run_turn
 
-BASE_DIR = Path(__file__).resolve().parent
-SESSIONS_FILE = BASE_DIR / "data" / "sessions.json"
+BASE_DIR = config.BASE_DIR
+SESSIONS_FILE = config.SESSIONS_FILE
 HISTORY_ROUNDS = 2  # 金鱼记忆：喂最近 2 轮（见模块注释第 2 条）
 
-load_dotenv(BASE_DIR / ".env")
-WEB_API_TOKEN = os.environ.get("WEB_API_TOKEN")
-if not WEB_API_TOKEN:
-    # fail fast：Web 是对外门脸，没钥匙 = 裸奔，不如不起（同 http_entry 的规矩）
-    sys.exit("[配置错误] Web 模式需要 .env 里的 WEB_API_TOKEN")
+config.require_secret("WEB_API_TOKEN")  # L4：fail fast 集中进 config
+WEB_API_TOKEN = os.environ["WEB_API_TOKEN"]
+
+# ---------- 结构化日志（L4）：JSON 行格式进 logs/web.log ----------
+# 每行一个 JSON 对象（ts/event/session_id/...）——grep 一个 session_id
+# 就能把一次对话的全链串起来：chat_start → tool_call → tool_result → chat_end。
+# 这是给机器读的账（对账/排查），CLI 的 print trace 是给人看的调试口，两不耽误。
+
+class _JsonLineFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        # record.msg 是 dict 就直接当载荷（单层 JSON）；是字符串就套个 msg 字段
+        core = record.msg if isinstance(record.msg, dict) else {"msg": record.getMessage()}
+        return json.dumps({"ts": datetime.now().isoformat(timespec="milliseconds"),
+                           "level": record.levelname, **core},
+                          ensure_ascii=False)
+
+
+def _setup_logging() -> logging.Logger:
+    config.LOG_DIR.mkdir(exist_ok=True)  # 日志目录自动建，一键起的底气
+    logger = logging.getLogger("web")
+    handler = logging.FileHandler(config.LOG_DIR / "web.log", encoding="utf-8")
+    handler.setFormatter(_JsonLineFormatter())
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+    return logger
+
+
+logger = _setup_logging()
+
+
+def _log(event: str, session_id: str, **fields) -> None:
+    logger.info({"event": event, "session_id": session_id, **fields})
 
 
 # ---------- sessions.json 账本（读改存纪律，同业务账本） ----------
@@ -91,7 +120,7 @@ _chat_lock = asyncio.Lock()  # 串行化对话轮（见模块注释第 3 条）
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    role = os.environ.get("APP_ROLE", "trader")
+    role = config.APP_ROLE
     async with build_agent(role) as agent:  # 公共件：CLI 同款后厨
         _state["agent"] = agent
         _state["role"] = role
@@ -151,11 +180,28 @@ async def chat(body: ChatIn):
             raise HTTPException(status_code=400, detail="消息不能为空")
 
         now = datetime.now().isoformat(timespec="seconds")
+        t0 = time.perf_counter()
+        _log("chat_start", body.session_id, question=question[:80])
+        tool_t0 = {}  # 工具计时：call→result 一对，量出每把刀磨了多久
+
+        def _web_event(kind: str, payload) -> None:
+            # L3 埋的 on_event 回调在 L4 长成日志管线——工具一动手就记账
+            if kind == "call":
+                tool_t0["t"] = time.perf_counter()
+                _log("tool_call", body.session_id, tool=payload["tool"],
+                     args=payload["args"])
+            else:
+                _log("tool_result", body.session_id, result=str(payload)[:200],
+                     duration_ms=round((time.perf_counter() - tool_t0.get("t", t0)) * 1000))
+
         try:
             answer, _new_msgs, trace = await run_turn(
-                _state["agent"], _feed_history(session["messages"]), question)
+                _state["agent"], _feed_history(session["messages"]), question,
+                on_event=_web_event)
         except Exception as e:
             # 失败轮不进账（见模块注释第 4 条）：错误原样告诉前端，会话不动
+            _log("chat_error", body.session_id, error=f"{type(e).__name__}: {e}",
+                 duration_ms=round((time.perf_counter() - t0) * 1000))
             return {"answer": f"[出错] {type(e).__name__}: {e}", "trace": [], "error": True}
 
         if not answer:
@@ -168,6 +214,8 @@ async def chat(body: ChatIn):
         if session["title"] == "新会话":
             session["title"] = question[:20]  # 首问当会话标题
         _save_sessions(sessions)  # 改完这份才存
+        _log("chat_end", body.session_id, answer_head=answer[:80],
+             duration_ms=round((time.perf_counter() - t0) * 1000))
         return {"answer": answer, "trace": trace}
 
 
