@@ -116,6 +116,12 @@ def cancel_order(order_id: str, confirmed: bool = False) -> str:
         if o["order_id"].upper() == order_id.upper():
             if o["status"] == "已取消":
                 return f"订单 {o['order_id']} 已经是已取消状态，无需重复操作。"
+            # 【学徒注】L1 修的真 bug：站 0 给订单长出"已收货"第三态后，
+            # 这里漏了拦——收了的货再"取消"，库存加过的数量就对不上账了。
+            # docstring 早就写着"只有已下单的订单能取消"，代码现在才跟上
+            if o["status"] != "已下单":
+                return (f"订单 {o['order_id']} 当前状态为「{o['status']}」，"
+                        "只有已下单的订单才能取消。")
             o["status"] = "已取消"
             _write(ORDERS_FILE, orders)  # 存这份
             return json.dumps(o, ensure_ascii=False)

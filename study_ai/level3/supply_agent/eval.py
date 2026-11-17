@@ -5,13 +5,15 @@
    LLM 会不会路由到正确的工具，那是六连测手跑的事，不进考卷。
 2. 数据隔离——考卷跑在临时目录的账本副本上，跑完真账一字未动。
    手法：monkeypatch 各 Server 模块的路径常量指向临时副本，finally 还原。
-   （站 1 换 SQLite 后，隔离钥匙换成环境变量 SUPPLY_DB_PATH，断言不动。）
 3. 每个真实 bug 进考卷当回归锚点——改完代码必跑 eval。
+   （L1 修的真 bug：采购取消"已收货"单曾被放行 → 测26 锚定）
 
-考卷结构（17 题）：
+考卷结构（26 题）：
   查询组 ①~⑨：六连测的函数级等价（命中/大小写/诚实拒答/排序/别名）
-  闸门组 ⑩~⑬：三个写工具的 confirmed 闸门 + 假数据拒单（账本必须零变化）
+  闸门组 ⑩~⑬：写工具的 confirmed 闸门 + 假数据拒单（账本必须零变化）
   写账组 ⑭~⑰：真实写账（下单/取消幂等/收货全链 46→246→346/状态边界）
+  卖出组 ⑱~㉖：客户搜索 / 销售闸门 / 出库闸门 / 卖出+出库扣减 /
+               库存不足拒 / 双向闭环 / 取消幂等+已收货拒取消
 
 用法：python eval.py   （全绿 exit 0，有挂科 exit 1）
 """
@@ -24,26 +26,35 @@ from pathlib import Path
 BASE = Path(__file__).resolve().parent
 sys.path.insert(0, str(BASE / "servers"))
 
+import customer_server as cust      # noqa: E402
 import inventory_server as inv      # noqa: E402
 import logistics_server as log      # noqa: E402
 import procurement_server as proc   # noqa: E402
+import sales_server as sales        # noqa: E402
 import supplier_server as sup       # noqa: E402
 
 DATA_DIR = BASE / "data"
-LEDGERS = ["inventory.json", "orders.json", "suppliers.json", "logistics.json"]
+LEDGERS = ["inventory.json", "orders.json", "suppliers.json", "logistics.json",
+           "customers.json", "sales_orders.json"]
 
 # 隔离钥匙：各 Server 模块里所有会碰账本的路径常量，全部改指临时副本
 PATCH_TARGETS = [
     (inv, "INVENTORY_FILE", "inventory.json"),
     (inv, "ORDERS_FILE", "orders.json"),
+    (inv, "SALES_ORDERS_FILE", "sales_orders.json"),
     (sup, "DATA_FILE", "suppliers.json"),
     (log, "DATA_FILE", "logistics.json"),
     (proc, "ORDERS_FILE", "orders.json"),
     (proc, "SUPPLIERS_FILE", "suppliers.json"),
     (proc, "INVENTORY_FILE", "inventory.json"),
+    (cust, "DATA_FILE", "customers.json"),
+    (sales, "SALES_ORDERS_FILE", "sales_orders.json"),
+    (sales, "CUSTOMERS_FILE", "customers.json"),
+    (sales, "INVENTORY_FILE", "inventory.json"),
 ]
 
 FAILURES = []
+CHECKS = 0
 
 
 def patch_paths(tmp: Path) -> dict:
@@ -71,6 +82,8 @@ def jread(path: Path) -> list:
 
 
 def check(n: int, name: str, cond: bool, detail: str = "") -> None:
+    global CHECKS
+    CHECKS += 1
     line = f"【测{n:02d}】{name} {'PASS' if cond else 'FAIL'}"
     if not cond and detail:
         line += f"  ← {detail}"
@@ -202,6 +215,83 @@ def test_write_group(tmp: Path):
           f"r_cancelled={r_cancelled!r} r_missing={r_missing!r} stock={stock}")
 
 
+# ---------------------------- 卖出组 ----------------------------
+
+def test_sales_group(tmp: Path):
+    # ⑱ 客户品类搜索：轴承 → 宝安五金 + 福田贸易，按编号稳定排序
+    hits = json.loads(cust.search_customers("轴承"))
+    ids = [h["id"] for h in hits]
+    check(18, "客户品类搜索", ids == ["CUS-002", "CUS-004"], f"got {ids}")
+
+    hits = json.loads(cust.search_customers("福田贸易"))
+    check(19, "客户别名命中", len(hits) == 1 and hits[0]["id"] == "CUS-004",
+          f"got {[h['id'] for h in hits]}")
+
+    r = cust.search_customers("量子纠缠")
+    check(20, "客户假词诚实+品类菜单", "未找到" in r and "深沟球轴承" in r,
+          f"got {r!r}")
+
+    # ㉑ 销售闸门：拒写 + 账本行数不变
+    before = len(jread(tmp / "sales_orders.json"))
+    r = sales.create_sales_order("CUS-002", "A004", 200, confirmed=False)
+    check(21, "create_sales_order 闸门", "未确认" in r
+          and len(jread(tmp / "sales_orders.json")) == before, f"r={r!r}")
+
+    # ㉒ 出库闸门：拒写 + 两本账零变化
+    so_before = jread(tmp / "sales_orders.json")
+    inv_before = jread(tmp / "inventory.json")
+    r = inv.outbound_goods("SO-2026-2001", confirmed=False)
+    check(22, "outbound_goods 闸门", "未确认" in r
+          and jread(tmp / "sales_orders.json") == so_before
+          and jread(tmp / "inventory.json") == inv_before, f"r={r!r}")
+
+    # ㉓ 真实卖出 + 出库扣减（重置，本题自成一局）：
+    #    开单 SO-2026-2003(200×A004) → 出库种子单 SO-2001(500×A004)
+    #    → A004 2600-500=2100，2001 变已发货
+    reset_ledgers(tmp)
+    o = json.loads(sales.create_sales_order("CUS-002", "A004", 200, confirmed=True))
+    r2 = json.loads(inv.outbound_goods("SO-2026-2001", confirmed=True))
+    stock = next(x["quantity"] for x in jread(tmp / "inventory.json")
+                 if x["sku"] == "A004")
+    so2001 = next(x for x in jread(tmp / "sales_orders.json")
+                  if x["order_id"] == "SO-2026-2001")
+    check(23, "卖出入账+出库扣减", o["order_id"] == "SO-2026-2003"
+          and o["status"] == "已下单" and r2["stock_after"] == 2100
+          and stock == 2100 and so2001["status"] == "已发货"
+          and so2001.get("shipped_at"),
+          f"o={o} r2={r2} stock={stock}")
+
+    # ㉔ 库存不足拒出库（紧接上局：D003=60，开 99999 的大单）
+    sales.create_sales_order("CUS-001", "D003", 99999, confirmed=True)  # SO-2026-2004
+    r = inv.outbound_goods("SO-2026-2004", confirmed=True)
+    d003 = next(x["quantity"] for x in jread(tmp / "inventory.json")
+                if x["sku"] == "D003")
+    so2004 = next(x for x in jread(tmp / "sales_orders.json")
+                  if x["order_id"] == "SO-2026-2004")
+    check(24, "库存不足拒出库", "库存不足" in r and d003 == 60
+          and so2004["status"] == "已下单", f"r={r!r} d003={d003}")
+
+    # ㉕ 双向闭环（重置）：收货 1001(A003 46→246) → 卖 50 → 出库 → 196
+    reset_ledgers(tmp)
+    inv.receive_goods("PO-2026-1001", confirmed=True)
+    sales.create_sales_order("CUS-002", "A003", 50, confirmed=True)  # SO-2026-2003
+    r = json.loads(inv.outbound_goods("SO-2026-2003", confirmed=True))
+    stock = next(x["quantity"] for x in jread(tmp / "inventory.json")
+                 if x["sku"] == "A003")
+    check(25, "双向闭环 收→卖→出 246→196", r["stock_after"] == 196
+          and stock == 196, f"r={r} stock={stock}")
+
+    # ㉖ 取消销售单幂等 + 采购侧已收货拒取消（L1 修的真 bug 锚点）
+    reset_ledgers(tmp)
+    o = json.loads(sales.cancel_sales_order("SO-2026-2002", confirmed=True))
+    r2 = sales.cancel_sales_order("SO-2026-2002", confirmed=True)
+    inv.receive_goods("PO-2026-1001", confirmed=True)  # 1001 → 已收货
+    r3 = proc.cancel_order("PO-2026-1001", confirmed=True)
+    check(26, "取消幂等+已收货拒取消", o["status"] == "已取消"
+          and "已经是已取消" in r2 and "才能取消" in r3,
+          f"o={o} r2={r2!r} r3={r3!r}")
+
+
 def main() -> int:
     tmp = Path(tempfile.mkdtemp(prefix="supply_eval_"))
     originals = patch_paths(tmp)
@@ -210,6 +300,7 @@ def main() -> int:
         test_query_group(tmp)
         test_gate_group(tmp)
         test_write_group(tmp)
+        test_sales_group(tmp)
     finally:
         restore_paths(originals)
         shutil.rmtree(tmp, ignore_errors=True)
@@ -218,7 +309,7 @@ def main() -> int:
     if FAILURES:
         print(f"结果：{len(FAILURES)} 题挂科：{FAILURES}")
         return 1
-    print("结果：17 题全绿 PASS")
+    print(f"结果：{CHECKS} 题全绿 PASS")
     return 0
 
 

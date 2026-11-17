@@ -1,16 +1,25 @@
-"""supply_agent：供应链智能助手（MCP 版）
+"""supply_agent：供应链智能助手（MCP 版，中间商模式）
 
-架构（甲方乙方各就各位）：
+架构（甲方乙方各就各位，按角色挂载）：
   agent.py（我，乙方/客户端）
-    ├── 经 MCPAdapter 拉起 4 个本地 MCP Server 子进程（甲方，各管一本账）
-    │     ├── inventory_server.py   库存账（只读）
-    │     │     └── FastMCP over stdio：工具调用走 JSON-RPC 管道
-    │     ├── supplier_server.py    供应商账（只读）
-    │     ├── logistics_server.py   运单账（只读）
-    │     └── procurement_server.py 采购单账（读写，带确认闸门）
-    └── LangChain create_agent（qwen3.7-flash）+ 拿到的 9 把 MCP 工具 → 终端聊天
+    ├── 经 MCPAdapter 拉起 MCP Server 子进程（甲方，各管一本账）
+    │     ├── inventory_server.py   库存账（读 + 收货入库/销售出库写）
+    │     ├── supplier_server.py    供应商账（只读）      ┐ 买手侧
+    │     ├── procurement_server.py 采购单账（写，闸门）   ┘
+    │     ├── customer_server.py    客户账（只读）        ┐ 卖手侧
+    │     ├── sales_server.py       销售单账（写，闸门）   ┘
+    │     └── logistics_server.py   运单账（只读）        ← 两头共用的核心
+    └── LangChain create_agent（qwen3.7-flash）+ 挂到的 MCP 工具 → 终端聊天
+
+【APP_ROLE 挂载即开关】（需求 9：进货出货可选可拆）：
+  trader（默认）= 核心两座 + 买手侧 + 卖手侧（中间商，又买又卖）
+  buyer         = 核心两座 + 买手侧（只买不卖——LLM 工具名片里没有销售
+                  工具，"卖货"它想干也没门，只能礼貌拒绝）
+  seller        = 核心两座 + 卖手侧（只卖不买）
+只改挂载配置和 system prompt，不改任何 Server 代码——"不挂载 = 不存在"。
 
 运行：conda activate study_ai && python agent.py
+角色：APP_ROLE=buyer python agent.py（trader/buyer/seller，默认 trader）
 """
 import asyncio
 import os
@@ -25,25 +34,51 @@ from langchain_openai import ChatOpenAI
 BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / ".env")  # DASHSCOPE_API_KEY，学 FoodRAG
 
-SERVER_NAMES = ("inventory", "supplier", "logistics", "procurement")
+# 角色分组（需求 9 的架构落地）：
+CORE = ("inventory", "logistics")            # 中间环节：仓库（双向写）+ 物流
+BUY_SIDE = ("supplier", "procurement")       # 买手侧：供应商情报 + 采购写账
+SELL_SIDE = ("customer", "sales")            # 卖手侧：客户情报 + 销售写账
+ROLE_SERVERS = {
+    "trader": CORE + BUY_SIDE + SELL_SIDE,   # 中间商：两头都做
+    "buyer": CORE + BUY_SIDE,                # 只采购不销售
+    "seller": CORE + SELL_SIDE,              # 只销售不采购
+}
 
-# 【学徒注】关键坑：command 必须用 sys.executable（当前解释器的绝对路径），
-# 不能写裸 "python"——MCP Server 是子进程，裸 "python" 由 PATH 说了算，
-# 容易飘到系统 Python（那里没装 mcp 包，子进程秒死还难排查）
-MCP_CONFIG = {"mcpServers": {
-    name: {"command": sys.executable,
-           "args": [str(BASE_DIR / "servers" / f"{name}_server.py")],
-           "transport": "stdio"}
-    for name in SERVER_NAMES}}
+# 角色说明书：账本清单 + 业务边界，按角色拼进 system prompt
+ROLE_ACCOUNTS = {
+    "trader": "六本账：库存、供应商、物流、采购订单、客户、销售订单",
+    "buyer": "四本账：库存、供应商、物流、采购订单",
+    "seller": "四本账：库存、客户、物流、销售订单",
+}
+ROLE_BUSINESS = {
+    "trader": "本公司是中间商：向供应商采购进货，也向客户销售出货，赚差价。",
+    "buyer": "本公司只采购不销售——不从任何客户手里接销售单，用户要卖货时礼貌说明本公司不做销售。",
+    "seller": "本公司只销售不采购——不从任何供应商进货，用户要采购时礼貌说明本公司不做采购。",
+}
 
-SYSTEM_PROMPT = """你是「供小链」，一家小型工厂的供应链智能助手。你通过 MCP 工具查询和操作工厂的四本账：库存、供应商、物流、采购订单。
+
+def build_mcp_config(server_names: tuple) -> dict:
+    """按角色挑 Server 生成挂载配置（挂载即开关的唯一机关）"""
+    # 【学徒注】关键坑：command 必须用 sys.executable（当前解释器的绝对路径），
+    # 不能写裸 "python"——MCP Server 是子进程，裸 "python" 由 PATH 说了算，
+    # 容易飘到系统 Python（那里没装 mcp 包，子进程秒死还难排查）
+    return {"mcpServers": {
+        name: {"command": sys.executable,
+               "args": [str(BASE_DIR / "servers" / f"{name}_server.py")],
+               "transport": "stdio"}
+        for name in server_names}}
+
+
+def build_system_prompt(role: str) -> str:
+    return f"""你是「供小链」，一家小型贸易公司的供应链智能助手。你通过 MCP 工具查询和操作公司的{ROLE_ACCOUNTS[role]}。
+{ROLE_BUSINESS[role]}
 
 工作规则：
-1. 回答库存、供应商、物流、订单问题前，先调用对应工具查账，绝不凭空编造数字。工具说"未找到"就如实告诉用户。
+1. 回答库存、供应商、客户、物流、订单问题前，先调用对应工具查账，绝不凭空编造数字。工具说"未找到"就如实告诉用户。
 2. 用户问题含糊时（比如只说"轴承"没给 SKU），先用搜索类工具查，再向用户确认。
-3. 涉及下单或取消订单（写操作）：工具带 confirmed 参数。你必须先向用户复述订单要素（哪家供应商、什么物料、数量），取得用户明确同意后，才带 confirmed=true 调用。用户没同意之前绝不确认。
+3. 涉及下单、取消订单、收货入库、销售出库（写操作）：工具带 confirmed 参数。你必须先向用户复述订单要素（哪家公司、什么物料、数量），取得用户明确同意后，才带 confirmed=true 调用。用户没同意之前绝不确认。
 4. 回答用简洁中文，数字带单位。答完可以顺带提一句相关的提醒（比如库存低于安全线）。
-5. 和供应链无关的问题，礼貌说明你只管供应链，不瞎聊。"""
+5. 和本公司业务无关的要求，礼貌说明做不了，不瞎聊。"""
 
 
 def build_model() -> ChatOpenAI:
@@ -60,8 +95,9 @@ def _short(text: str, limit: int = 160) -> str:
     return text if len(text) <= limit else text[:limit] + " …"
 
 
-async def chat(agent) -> None:
-    print("供小链已上线（4 个 MCP Server：库存/供应商/物流/采购）。空回车退出。")
+async def chat(agent, role: str, server_names: tuple) -> None:
+    servers_desc = "/".join(server_names)
+    print(f"供小链已上线（角色 {role}，{len(server_names)} 个 MCP Server：{servers_desc}）。空回车退出。")
     # 【学徒注】对话历史手动记账（学 FoodRAG ask.py 金鱼记忆的教训）：
     # create_agent 本身不记上一轮——不给它喂全历史，用户说"确认"时它会失忆，
     # 上一轮复述的订单要素就断线了。这里每轮把历史 + 新问题一起喂进去，
@@ -105,13 +141,22 @@ async def chat(agent) -> None:
 
 
 async def main() -> None:
-    async with MCPAdapter(MCP_CONFIG) as adapter:
+    # 【学徒注】挂载即开关：角色只决定两件事——挂哪几座 Server、
+    # system prompt 里怎么介绍公司。Server 代码一行不动
+    role = os.environ.get("APP_ROLE", "trader")
+    if role not in ROLE_SERVERS:
+        print(f"[配置错误] 未知 APP_ROLE={role}（可选：trader / buyer / seller）")
+        return
+    server_names = ROLE_SERVERS[role]
+
+    async with MCPAdapter(build_mcp_config(server_names)) as adapter:
         tools = await adapter.list_tools()
-        print("已挂载 MCP 工具：")
+        print(f"已挂载 MCP 工具（APP_ROLE={role}）：")
         for t in tools:
             print(f"  - {t.name}")
-        agent = create_agent(build_model(), tools, system_prompt=SYSTEM_PROMPT)
-        await chat(agent)
+        agent = create_agent(build_model(), tools,
+                             system_prompt=build_system_prompt(role))
+        await chat(agent, role, server_names)
 
 
 if __name__ == "__main__":

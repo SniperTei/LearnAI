@@ -1,0 +1,4 @@
+[
+  {"order_id": "SO-2026-2001", "customer_id": "CUS-002", "sku": "A004", "quantity": 500, "status": "已下单", "created_at": "2026-11-14", "note": "螺栓月度供货"},
+  {"order_id": "SO-2026-2002", "customer_id": "CUS-001", "sku": "D001", "quantity": 10, "status": "已下单", "created_at": "2026-11-16", "note": "烤箱促销补货"}
+]

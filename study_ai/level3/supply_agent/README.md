@@ -1,7 +1,13 @@
-# supply_agent：供应链智能助手（MCP 版）
+# supply_agent：供应链智能助手（MCP 版，中间商模式）
 
-从零自己设计的第一个 Agent 项目：通用工厂供应链助手。核心课题——
-**MCP 协议本体**（Server 甲方 / Agent 客户端乙方）+ **工具设计谱系实战**（只读 vs 写、确认闸门、无状态代价）。
+从零自己设计的第一个 Agent 项目：小型贸易公司（中间商）的供应链助手——
+向供应商采购进货、入仓、出库、卖给客户，赚差价。核心课题——
+**MCP 协议本体**（Server 甲方 / Agent 客户端乙方）+ **工具设计谱系实战**
+（只读 vs 写、确认闸门、无状态代价）+ **按角色挂载的模块化架构**（APP_ROLE）。
+
+> 定位：**学习作业**（JSON 账本 + mock 数据）。学习路线见 [study_plan.md](study_plan.md)；
+> 需求背景见 [requirements.md](requirements.md)；真实系统完整方案见
+> [supply_plan.md](supply_plan.md)（SQLite / 批次 / 合同 / 报表，另立仓库时参考）。
 
 ## 架构图
 
@@ -10,12 +16,17 @@
  │
  ▼
 agent.py（乙方/客户端，LangChain create_agent + qwen3.7-flash）
- │  经 MCPAdapter 拉起 4 个子进程，走 stdio 管道说 JSON-RPC
- ├── inventory_server.py    库存账   data/inventory.json   ← 站0起带笔：收货入库（跨账本写）
- ├── supplier_server.py     供应商账 data/suppliers.json
- ├── logistics_server.py    运单账   data/logistics.json
- └── procurement_server.py  采购单账 data/orders.json      ← 写 Server（下单/取消）
+ │  经 MCPAdapter 按角色拉起 MCP Server 子进程，走 stdio 管道说 JSON-RPC
+ ├── inventory_server.py   库存账（读 + 收货入库/销售出库写，跨账本）
+ ├── logistics_server.py   运单账（只读）                ← 两头共用的核心
+ ├── supplier_server.py    供应商账（只读）   ┐ 买手侧
+ ├── procurement_server.py 采购单账（写，闸门）┘
+ ├── customer_server.py    客户账（只读）     ┐ 卖手侧
+ └── sales_server.py       销售单账（写，闸门）┘
 ```
+
+**APP_ROLE 挂载即开关**（trader 中间商=全挂 / buyer 只买 / seller 只卖）：
+不挂载 = LLM 的工具名片里没有 = 它想干也没门。详见"运行方法"。
 
 每次你问一句话：LLM 决定调哪把工具 → MCPAdapter 经管道发给对应 Server →
 Server 现读账本 → 结果原路返回 → LLM 组织答案。**Agent 从头到尾没碰过
@@ -35,11 +46,12 @@ async with MCPAdapter(config) as adapter:
 1. 按配置拉起 4 个子进程（`sys.executable servers/xxx_server.py`），
    各开一根 stdio 管道
 2. 每根管道先完成 MCP 握手：客户端发 `initialize` → Server 应答 →
-   再发 `tools/list` → Server 把 9 把工具的**说明书**（工具名 + docstring +
+   再发 `tools/list` → Server 把工具的**说明书**（工具名 + docstring +
    参数类型生成的 JSON Schema）递回来
 3. `adapter.list_tools()` 把它们变成 LangChain 工具，喂给 `create_agent`
 
-从此 LLM 的世界里多了 9 张"名片"——**它没见过函数代码，只见过说明书**。
+从此 LLM 的世界里多了这些"名片"——**它没见过函数代码，只见过说明书**
+（挂几座 Server 就有几叠名片，APP_ROLE 说了算）。
 
 ### 阶段一：一次问答的六步回路
 
@@ -105,7 +117,7 @@ LLM 做的**——如果问题问到"找谁补、几天到"，它才会去串第
 
 | 能力 | 是什么 | 本项目 |
 |---|---|---|
-| **Tools** | LLM 可调用的函数 | ✅ 9 把（下表） |
+| **Tools** | LLM 可调用的函数 | ✅ 16 把（下表） |
 | Resources | Server 暴露的只读数据文件 | ❌ 账本走工具返回，够用 |
 | Prompts  | Server 预制的提示词模板 | ❌ 人设住 agent.py 的 system prompt |
 
@@ -114,10 +126,13 @@ LLM 做的**——如果问题问到"找谁补、几天到"，它才会去串第
 | Server | 工具 | 读/写 | 设计要点 |
 |---|---|---|---|
 | inventory | `query_stock(sku, warehouse="")` / `list_low_stock()` | 只读 | 查不到诚实返回"未找到"+现有SKU清单 |
-| inventory | `receive_goods(order_id, confirmed=False)` | **写**（站0新增） | 收货入库：订单→已收货 + 库存加数量；同款确认闸门 |
+| inventory | `receive_goods(order_id, confirmed=False)` | **写**（站0） | 收货入库：订单→已收货 + 库存加数量；同款确认闸门 |
+| inventory | `outbound_goods(order_id, confirmed=False)` | **写**（L1） | 销售出库：单→已发货 + 库存扣减；库存不足诚实拒（绝不扣成负数）；最简版扣总数不做批次 |
 | supplier | `search_suppliers(keyword)` / `get_supplier(id)` | 只读 | 名称/品类/别名三处匹配；结果按交期排好序 |
 | logistics | `query_logistics(tracking_no)` / `list_in_transit()` | 只读 | 单笔给全轨迹；列表给摘要防撑爆上下文 |
 | procurement | `create_order(...)` / `get_order(id)` / `cancel_order(...)` | **写** | **确认闸门**（见下） |
+| customer | `search_customers(keyword)` / `get_customer(id)` | 只读（L1） | 与 supplier 对称；品类逐项子串匹配（"轴承"命中"深沟球轴承"） |
+| sales | `create_sales_order(...)` / `get_sales_order(id)` / `cancel_sales_order(...)` | **写**（L1） | 与 procurement 对称：同款闸门/状态机；下单不查库存（先接单后备货） |
 
 ## 四座 MCP Server 详介
 
@@ -183,24 +198,51 @@ confirmed=true 重新调用"。LLM 由工具返回值教会守规矩——prompt
 验收实证：下单 → 先复述要素问确认 → 用户"确认" → 才真正写账
 （PO-2026-1003）；取消同款流程。
 
-### 四座合起来的分工美学
+### 5/6. customer + sales — 卖手侧两座（L1 新增，与买手侧镜像对称）
 
-- **一域一 Server 一账本**：库存问管家、供应商问情报员、物流问追踪员、
-  下单找采购员——LLM 按工具 docstring 自己找到对的人（语义路由）。
+买手侧是 supplier（情报）+ procurement（写账），卖手侧照样子长出
+customer（情报）+ sales（写账）——**新增一个域不是改老代码，是长新 Server**。
+
+- `customer_server.py` 管 `data/customers.json`（5 家 mock 客户，带别名）：
+  `search_customers`（名称/品类/别名匹配，按编号稳定排序）、`get_customer`。
+  一处不同：供应商品类存品类词（"轴承"整词可命中），客户品类存货名
+  （"深沟球轴承"），必须**逐项子串匹配**——eval 测18 逮的真 bug。
+- `sales_server.py` 管 `data/sales_orders.json`（SO-2026-200x 发号）：
+  `create_sales_order` / `get_sales_order` / `cancel_sales_order`，
+  闸门合同与 procurement 一字同款（好的合同抄过来就用）。
+  设计取舍：**下单不查库存**（先接单后备货），库存够不够是出库时的事。
+
+**验收实证（L1）**：卖给宝安五金 200 个 A004 → 复述要素问确认 → 用户"确认"
+→ SO-2026-2003 入账 → 出库问确认 → A004 2600→2400；
+buyer 模式问"卖 100 个轴承"→ 礼貌说明本公司不做销售（工具名片里没有销售工具）。
+
+### 六座合起来的分工美学
+
+- **一域一 Server 一账本**：库存问管家、供应商/客户问情报员、物流问追踪员、
+  下单找采购员/销售员——LLM 按工具 docstring 自己找到对的人（语义路由）。
+- **买手侧卖手侧镜像对称**：supplier:customer = procurement:sales。
+  对称不只是好看——新域照样子长，老代码一行不动（L1 的全部新增都在新文件里）。
 - **工具名自动带前缀**：挂载后叫 `inventory_query_stock`、`supplier_search_suppliers`
   ……多座 Server 同名工具不打架，命名空间白送。
-- **写权限按域划分**（站 0 升级）：原来是"一个 Server 一支笔"
-  （procurement 独占写），站 0 加收货入库后变成**"每域管自己的写"**——
-  下单/取消是采购域的活，收货入库是库存域的活（货进的是库存的仓库）。
-  代价是库存管家伸手改了采购账（orders.json）：**跨账本写**，埋下
-  半写/丢更新两案（见"生产化改造·站 0"），站 1 用事务治。
+- **写权限按域划分**：下单/取消是采购域的活，开销售单是销售域的活，
+  收货入库/销售出库是库存域的活（货进出都是库存的仓库）。
+  代价是跨账本写（库存管家两只手伸进采购账和销售账）：**半写/丢更新两案**
+  已立案演示（见"学习路线·L0"），真药方（事务）记录在 supply_plan.md。
 
 ## 运行方法
 
 ```bash
 conda activate study_ai
-python agent.py        # 空回车或 Ctrl+C 退出
+python agent.py                    # trader（默认）：中间商，六座全挂
+APP_ROLE=buyer python agent.py    # 只买不卖（买手侧 + 核心）
+APP_ROLE=seller python agent.py   # 只卖不买（卖手侧 + 核心）
 ```
+
+**APP_ROLE 挂载即开关**（需求 9：进货出货可选可拆）：角色只决定两件事——
+挂哪几座 Server（CORE=inventory+logistics 两头共用，BUY=supplier+procurement，
+SELL=customer+sales）+ system prompt 里怎么介绍公司业务边界。**Server 代码
+一行不动**——"不挂载 = 不存在"，LLM 工具名片里没有销售工具，用户要卖货
+它只能礼貌拒绝（buyer 模式实测）。
 
 前置：`.env` 里有 `DASHSCOPE_API_KEY`；依赖 `langchain[mcp]`（已装，
 含 fastmcp/mcp 运行时）。单独调试某个 Server：`python servers/inventory_server.py`
@@ -221,21 +263,22 @@ python agent.py        # 空回车或 Ctrl+C 退出
 LLM 语义路由 > FoodRAG 词表路由的活例子；②函数级单测 confirmed=False
 两个写工具都拒写。
 
-## 生产化改造：本机生产演练 → 云部署（六站路线）
+## 学习路线（study_plan.md，L0~L5）
 
-Mock 版通车后启动的生产化路线，主线是**先让旧设计的毛病暴露，再上新手段治它**：
+> 2026-11-17 起本项目定位为**学习作业**（JSON + mock，能用 mock 就 mock）。
+> 主线：先让旧设计的毛病暴露，再上新手段治它。真实系统完整方案另存
+> [supply_plan.md](supply_plan.md)。
 
-| 站 | 主题 | 治什么病 | 状态 |
+| 站 | 主题 | 学什么 | 状态 |
 |---|---|---|---|
-| 0 | 业务闭环：收货入库 + eval 回归考卷 | 补业务缺口（在途单签收后库存不涨）；埋雷：JSON 跨账本写的半写/丢更新 | ✅ 2026-11-17 |
-| 1 | 数据层：JSON → SQLite | 站 0 两案结案：事务治半写，锁治丢更新；audit_log 起步 | |
-| 2 | 服务层：stdio → HTTP 常驻 | stdio 单机局限；API Key 认证 | |
-| 3 | 接口层：FastAPI Web + 服务端会话 | 终端 CLI → 浏览器聊天页 | |
-| 4 | 工程化：config 集中 / JSON 日志 / 锁版本 | 配置散、日志无链路、依赖飘 | |
-| 5 | 本机部署演练：Docker Compose | 一键起全家 + 卷持久化 | |
-| 6 | 云部署 | 前置清单（不含施工） | |
+| L0 | 业务闭环：收货入库 + eval 考卷 | 写工具闸门 / 回归考卷 / JSON 账本的坑 | ✅ 2026-11-17 |
+| L1 | 卖出闭环 + APP_ROLE | 长出新域（对称设计）/ 挂载即开关 | ✅ 2026-11-17 |
+| L2 | HTTP 常驻（**混合传输**） | 按座迁 stdio→HTTP / 生命周期对比 / kill 实验 | ⬜ |
+| L3 | FastAPI Web | 浏览器聊天页 + 服务端会话 | ⬜ |
+| L4 | 工程化 lite | config 集中 / 锁版本 / 日志 | ⬜ |
+| L5 | Docker Compose（毕业站） | 容器化部署 / 卷持久化 / healthcheck | ⬜ |
 
-### 站 0：业务闭环——收货入库 + eval 回归考卷（2026-11-17 全绿 ✅）
+### L0（原站 0）：收货入库 + eval 考卷（2026-11-17 全绿 ✅）
 
 **业务缺口**：PO-2026-1001 在途 200 个轴承，签收了库存却不涨——缺一把
 收货入库的工具。补上 `receive_goods`（住 inventory，合同与 create_order
@@ -260,6 +303,27 @@ Server 路径常量，跑完真账一字未动。惯例：每个真实 bug 进�
 
 验收实录：eval 17 题全绿；CLI 端到端"下单→确认→收货→确认→查库存 246"
 两道闸门都灵（测完账本还原）；两案演示均可复现。
+
+### L1：卖出闭环 + APP_ROLE 三模式（2026-11-17 全绿 ✅）
+
+**长出一个新域**：卖手侧两座 Server（customer 情报 + sales 写账）与买手侧
+镜像对称，采购/库存/物流老代码零改动（新增全在新文件）。库存管家多了
+出库的手：`outbound_goods` 与 `receive_goods` 同款闸门，**库存不足诚实拒，
+绝不扣成负数**；出库最简版直接扣总数，批次/先进先出留给真实系统。
+
+**APP_ROLE 挂载即开关**（需求 9 架构验证）：trader/buyer/seller 三模式
+只改挂载配置和 system prompt。buyer 实测：工具名片里没有销售工具，
+"卖 100 个轴承"被礼貌拒绝。
+
+**eval 扩到 26 题**（卖出组 ⑱~㉖：客户搜索/闸门/出库扣减/库存不足拒/
+双向闭环 收→卖→出 246→196/取消幂等）。**L1 逮住两个真 bug 进考卷**：
+① 采购 cancel_order 放行"已收货"单（站 0 长出第三态后漏拦，违反自家
+docstring）② 客户品类匹配用整元素相等，"轴承"命中不了"深沟球轴承"
+（改为逐项子串匹配）。
+
+验收实录：eval 26 题全绿；trader 端到端"卖给宝安五金 200 个 A004 →确认→
+SO-2026-2003 → 出库确认 → 2600→2400"；buyer 模式拒卖货 + 核心查询正常
+（测完账本还原）。
 
 ## 教学沉淀
 
