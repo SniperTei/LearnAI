@@ -104,9 +104,14 @@ def build_mcp_config(server_names: tuple) -> dict:
     for name in server_names:
         if name in http_servers:
             # 【学徒注】HTTP 形态：url 指向常驻进程 + 认证头带钥匙。
-            # 和 stdio 条目住同一张配置表——MCPAdapter 只认配置不认传输方式
+            # 和 stdio 条目住同一张配置表——MCPAdapter 只认配置不认传输方式。
+            # 主机名三级约定（L5 Docker 用）：MCP_HTTP_HOST=service → 用 Server 名
+            # 当主机名（compose 里服务名即主机名，容器网络 DNS 白送）；
+            # 其他值当统一主机名覆盖；不设默认 127.0.0.1（本机自起自连）
+            host_override = os.environ.get("MCP_HTTP_HOST")
+            host = name if host_override == "service" else (host_override or "127.0.0.1")
             servers[name] = {
-                "url": f"http://127.0.0.1:{SERVER_PORTS[name]}/mcp",
+                "url": f"http://{host}:{SERVER_PORTS[name]}/mcp",
                 # 【学徒注】踩坑：fastmcp 配置校验要连字符 "streamable-http"，
                 # 下划线 "streamable_http" 直接 pydantic 报 literal_error
                 "transport": "streamable-http",

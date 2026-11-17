@@ -244,6 +244,12 @@ MCP_TRANSPORT=inventory:http python agent.py     # inventory 走 HTTP，其余 s
 
 # L3 Web：浏览器聊天页（.env 需 WEB_API_TOKEN，浏览器右上角填同款钥匙）
 python web.py                                   # → http://127.0.0.1:8000
+
+# L5 Docker：七个容器一次编排（.env 的三把钥匙自动注入）
+docker compose up --build -d                    # → http://localhost:8000
+docker compose ps                               # 看健康状态
+docker compose down                             # 停全家（账留在卷里）
+# ⚠️ docker compose down -v 会连卷清掉 = 六本账归零！平时停服务别带 -v
 ```
 
 **APP_ROLE 挂载即开关**（需求 9：进货出货可选可拆）：角色只决定两件事——
@@ -284,7 +290,7 @@ LLM 语义路由 > FoodRAG 词表路由的活例子；②函数级单测 confirm
 | L2 | HTTP 常驻（**混合传输**） | 按座迁 stdio→HTTP / 生命周期对比 / kill 实验 | ✅ 2026-11-17 |
 | L3 | FastAPI Web | 浏览器聊天页 + 服务端会话 | ✅ 2026-11-17 |
 | L4 | 工程化 lite | config 集中 / 锁版本 / 日志 | ✅ 2026-11-17 |
-| L5 | Docker Compose（毕业站） | 容器化部署 / 卷持久化 / healthcheck | ⬜ |
+| L5 | Docker Compose（毕业站） | 容器化部署 / 卷持久化 / healthcheck | ✅ 2026-11-17 |
 
 ### L0（原站 0）：收货入库 + eval 考卷（2026-11-17 全绿 ✅）
 
@@ -418,6 +424,48 @@ chat_end`，每行带 session_id——`grep <session_id> logs/web.log`
 grep session_id 串全链（chat_start/tool_call 38ms/chat_end 6581ms）；
 MCP HTTP 座日志落盘（health 200/带 key 200/无 key 401 全记录）；
 CLI 复测不退化；fail fast 冒烟（缺钥匙当场退出并指路 .env.example）。
+
+### L5：Docker Compose 毕业站（2026-11-17 全绿 ✅）
+
+**一个镜像七场演出**：`Dockerfile`（python:3.11-slim + 锁版本依赖 +
+拷代码和种子账本）构建一次，compose 用不同 `command` 起七个容器——
+六座 MCP Server 全 `--http`（容器内听 0.0.0.0）+ web（唯一对宿主机
+开 8000 端口，六座 MCP 只在容器内网互访）。**密钥不进镜像**：
+.env 在 .dockerignore 挡掉，三把钥匙走 compose environment 注入
+（镜像会被分发，钥匙跟着镜像走 = 见者有份）。
+
+**容器网络 DNS（又一次"只改配置不改代码"）**：web 容器里 agent 连
+MCP Server 用的是服务名 `http://inventory:8101/mcp`——compose 自带
+DNS，服务名即主机名。agent.py 只认 `MCP_HTTP_HOST=service` 这个
+环境变量约定（url 主机名换成 Server 名），业务代码零改动。
+
+**卷持久化**：`supply-data`（六本 JSON 账 + 会话账）和 `logs` 两个
+命名卷挂进所有容器；首次起卷时 Docker 把镜像里的种子 data/ 拷进
+空卷，之后容器随便杀随便重建，账本活在卷里。
+**healthcheck 链**：每座 MCP 打 `/health`，web `depends_on:
+service_healthy`——六座全部探活通过 web 才起，不让它在 Server
+没醒时就去连。
+
+**依赖三步装法（本站最大的坑）**：容器里干净解析天生不可能——
+fastapi 0.121.3 钉死 starlette<0.51，fastmcp 4.2（经 fastmcp-slim
+[client,server]）要 >=1.0.1，ResolutionImpossible。宿主机当初是
+"先装齐再降级"救回来的共存态；Dockerfile 照方抓药：①摘掉
+fastapi/starlette 两行装齐全家 ②强制压回 starlette 0.50.0
+③最后装 fastapi。pip 中途警告依赖冲突——警告不是错误，运行时
+真不兼容才炸，而这个组合 L2~L4 已全部实测。
+
+> ⚠️ **红字警告：`docker compose down -v` 会连卷一起清掉——六本账
+> 全部归零！** 平时停服务用 `down`（不带 -v）或 `stop`。验收时
+> 亲手试过一次：down -v 后 up，账本回到镜像种子状态。
+
+验收实录：`docker compose up --build -d` 一键起全家（六座 healthy
+后 web 才启动）；localhost:8000 **六连测全通**——查库存/低库存/
+供应商比价/物流轨迹全准，下单复述→"确认"→PO-2026-1003 落单→
+取消复述→"确认"→已取消（确认闸门在"web 容器→HTTP→MCP 容器"
+全链上照样灵）；**kill 实验**：`compose kill` 全家被杀 → `up -d`
+→ 卷里订单、16 条会话消息分毫无损，接着聊 LLM 还记得那单已取消；
+宿主机真账全程零接触（写脏的只是卷——容器化天然隔离的红利）；
+`down -v` + `up` 验证卷重置（种子重新拷入）。
 
 ## 教学沉淀
 

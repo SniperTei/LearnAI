@@ -225,4 +225,6 @@ app.mount("/", StaticFiles(directory=BASE_DIR / "static", html=True), name="stat
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="127.0.0.1", port=8000, log_level="warning")
+    # WEB_HOST 可覆盖（L5 Docker 容器内要听 0.0.0.0 才能被端口映射到）
+    uvicorn.run(app, host=os.environ.get("WEB_HOST", "127.0.0.1"),
+                port=int(os.environ.get("WEB_PORT", "8000")), log_level="warning")

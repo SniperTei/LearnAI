@@ -1,0 +1,8 @@
+# 不进镜像的东西
+.env            # 密钥走 compose 注入，绝不进镜像
+.git
+__pycache__/
+*.pyc
+logs/           # 运行时日志住卷里
+data/sessions.json  # 会话是运行时账，不是种子
+.claude/

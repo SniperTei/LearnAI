@@ -1,0 +1,109 @@
+# docker-compose.yml — 七个服务一次编排（L5 毕业站）
+#
+# 【学徒注】三个教学点：
+# 1. 容器网络 DNS：web 连 MCP Server 用的是服务名（http://inventory:8101/mcp）
+#    ——compose 自带 DNS，服务名即主机名。agent.py 只认 MCP_HTTP_HOST=service
+#    这个环境变量约定，代码零改动（又一次"换环境只改配置"）。
+# 2. 卷持久化：supply-data 挂 /app/data（六本 JSON 账 + 会话账），logs 挂
+#    /app/logs。容器随便杀随便升级，账本活在卷里。首次起卷时 Docker 会把
+#    镜像里的种子 data/ 拷进空卷。
+# 3. healthcheck + depends_on(service_healthy)：web 等六座 MCP 全部探活
+#    通过才起——不让 web 在 Server 还没醒时就去连。
+#
+# ⚠️ 红字警告：docker compose down -v 会连卷一起清掉——六本账全部归零！
+#    平时停服务用 down（不带 -v）或 stop。
+#
+# 密钥从同目录 .env 读（compose 自动做变量替换，.env 不进镜像不进库）。
+
+x-mcp-common: &mcp-common
+  build: .
+  restart: unless-stopped
+  environment: &mcp-env
+    MCP_API_KEY: ${MCP_API_KEY}
+    MCP_HOST: 0.0.0.0        # 容器内必须听 0.0.0.0，127.0.0.1 只有容器自己听得见
+  volumes:
+    - supply-data:/app/data
+    - logs:/app/logs
+  healthcheck:
+    interval: 5s
+    timeout: 3s
+    retries: 5
+    # 端口跟各座对齐（healthcheck 在容器内跑，打自己的 127.0.0.1）
+    test: ["CMD-SHELL", "python -c \"import urllib.request as u; u.urlopen('http://127.0.0.1:8101/health', timeout=2)\""]
+
+services:
+  inventory:
+    <<: *mcp-common
+    command: python servers/inventory_server.py --http
+
+  supplier:
+    <<: *mcp-common
+    command: python servers/supplier_server.py --http
+    healthcheck:
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      test: ["CMD-SHELL", "python -c \"import urllib.request as u; u.urlopen('http://127.0.0.1:8102/health', timeout=2)\""]
+
+  logistics:
+    <<: *mcp-common
+    command: python servers/logistics_server.py --http
+    healthcheck:
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      test: ["CMD-SHELL", "python -c \"import urllib.request as u; u.urlopen('http://127.0.0.1:8103/health', timeout=2)\""]
+
+  procurement:
+    <<: *mcp-common
+    command: python servers/procurement_server.py --http
+    healthcheck:
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      test: ["CMD-SHELL", "python -c \"import urllib.request as u; u.urlopen('http://127.0.0.1:8104/health', timeout=2)\""]
+
+  customer:
+    <<: *mcp-common
+    command: python servers/customer_server.py --http
+    healthcheck:
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      test: ["CMD-SHELL", "python -c \"import urllib.request as u; u.urlopen('http://127.0.0.1:8105/health', timeout=2)\""]
+
+  sales:
+    <<: *mcp-common
+    command: python servers/sales_server.py --http
+    healthcheck:
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      test: ["CMD-SHELL", "python -c \"import urllib.request as u; u.urlopen('http://127.0.0.1:8106/health', timeout=2)\""]
+
+  web:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8000:8000"           # 唯一对宿主机开的门；六座 MCP 只在容器内网互访
+    environment:
+      <<: *mcp-env            # MCP_API_KEY：web 是它们的客户端，也得有内网钥匙
+      DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY}
+      WEB_API_TOKEN: ${WEB_API_TOKEN}
+      WEB_HOST: 0.0.0.0
+      MCP_TRANSPORT: inventory:http,supplier:http,logistics:http,procurement:http,customer:http,sales:http
+      MCP_HTTP_HOST: service  # 约定值：url 主机名用 Server 名（容器 DNS）
+    volumes:
+      - supply-data:/app/data
+      - logs:/app/logs
+    depends_on:
+      inventory: {condition: service_healthy}
+      supplier: {condition: service_healthy}
+      logistics: {condition: service_healthy}
+      procurement: {condition: service_healthy}
+      customer: {condition: service_healthy}
+      sales: {condition: service_healthy}
+
+volumes:
+  supply-data:
+  logs:
