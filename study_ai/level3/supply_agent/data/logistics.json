@@ -1,0 +1,19 @@
+[
+  {"tracking_no": "LG-2026-0001", "order_ref": "PO-2026-1001", "supplier": "华精轴承制造", "origin": "苏州", "destination": "深圳工厂", "status": "在途", "eta": "2026-11-19", "events": [
+    {"time": "2026-11-14 09:20", "location": "苏州", "desc": "供应商发货，快递揽收"},
+    {"time": "2026-11-15 14:45", "location": "上海转运中心", "desc": "运输中"},
+    {"time": "2026-11-16 22:10", "location": "广州分拨中心", "desc": "运输中"}
+  ]},
+  {"tracking_no": "LG-2026-0002", "order_ref": "PO-2026-1002", "supplier": "宏达包装制品", "origin": "东莞", "destination": "深圳工厂", "status": "派送中", "eta": "2026-11-17", "events": [
+    {"time": "2026-11-16 08:00", "location": "东莞", "desc": "供应商发货，快递揽收"},
+    {"time": "2026-11-17 08:30", "location": "深圳龙华网点", "desc": "派送中，快递员 132-8888-9999"}
+  ]},
+  {"tracking_no": "LG-2026-0003", "order_ref": "", "supplier": "蓝天电子科技", "origin": "杭州", "destination": "深圳工厂", "status": "在途", "eta": "2026-11-18", "events": [
+    {"time": "2026-11-15 11:00", "location": "杭州", "desc": "供应商发货，快递揽收"},
+    {"time": "2026-11-16 19:30", "location": "南昌中转站", "desc": "运输中"}
+  ]},
+  {"tracking_no": "LG-2026-0004", "order_ref": "PO-2026-0999", "supplier": "鑫源金属材料", "origin": "佛山", "destination": "深圳工厂", "status": "已签收", "eta": "2026-11-14", "events": [
+    {"time": "2026-11-12 10:00", "location": "佛山", "desc": "供应商发货，快递揽收"},
+    {"time": "2026-11-14 15:20", "location": "深圳工厂", "desc": "已签收，收货人仓管老周"}
+  ]}
+]

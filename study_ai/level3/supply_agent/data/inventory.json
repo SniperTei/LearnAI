@@ -1,0 +1,14 @@
+[
+  {"sku": "A001", "name": "冷轧钢板 2mm", "category": "原材料", "warehouse": "原料仓", "quantity": 3200, "unit": "张", "safety_stock": 500, "updated_at": "2026-11-15"},
+  {"sku": "A002", "name": "铝锭 ADC12", "category": "原材料", "warehouse": "原料仓", "quantity": 800, "unit": "千克", "safety_stock": 200, "updated_at": "2026-11-15"},
+  {"sku": "A003", "name": "深沟球轴承 6204", "category": "零部件", "warehouse": "五金仓", "quantity": 46, "unit": "个", "safety_stock": 100, "updated_at": "2026-11-16"},
+  {"sku": "A004", "name": "不锈钢螺栓 M8×30", "category": "零部件", "warehouse": "五金仓", "quantity": 2600, "unit": "个", "safety_stock": 500, "updated_at": "2026-11-14"},
+  {"sku": "A005", "name": "电子控制板 v2", "category": "零部件", "warehouse": "电子仓", "quantity": 18, "unit": "块", "safety_stock": 30, "updated_at": "2026-11-16"},
+  {"sku": "A006", "name": "硅胶密封圈 O型 40mm", "category": "零部件", "warehouse": "五金仓", "quantity": 95, "unit": "个", "safety_stock": 50, "updated_at": "2026-11-13"},
+  {"sku": "B001", "name": "食品级润滑油", "category": "原材料", "warehouse": "原料仓", "quantity": 40, "unit": "升", "safety_stock": 10, "updated_at": "2026-11-12"},
+  {"sku": "C001", "name": "瓦楞纸箱 60×40×40", "category": "包装材料", "warehouse": "包材仓", "quantity": 1500, "unit": "个", "safety_stock": 300, "updated_at": "2026-11-11"},
+  {"sku": "C002", "name": "缓冲泡沫内衬", "category": "包装材料", "warehouse": "包材仓", "quantity": 120, "unit": "个", "safety_stock": 200, "updated_at": "2026-11-16"},
+  {"sku": "D001", "name": "智能温控烤箱 X1", "category": "成品", "warehouse": "成品仓", "quantity": 85, "unit": "台", "safety_stock": 20, "updated_at": "2026-11-15"},
+  {"sku": "D002", "name": "台式搅拌机 M5", "category": "成品", "warehouse": "成品仓", "quantity": 42, "unit": "台", "safety_stock": 15, "updated_at": "2026-11-15"},
+  {"sku": "D003", "name": "破壁机 P2", "category": "成品", "warehouse": "成品仓", "quantity": 60, "unit": "台", "safety_stock": 20, "updated_at": "2026-11-14"}
+]

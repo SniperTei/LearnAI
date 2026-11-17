@@ -1,0 +1,8 @@
+[
+  {"id": "SUP-001", "name": "华精轴承制造", "categories": ["轴承", "传动件"], "lead_time_days": 7, "rating": 4.8, "price_level": "中", "contact": "王经理 138-0123-4567", "aliases": ["华精", "HZB轴承"]},
+  {"id": "SUP-002", "name": "恒力五金供应", "categories": ["螺栓", "紧固件", "轴承"], "lead_time_days": 12, "rating": 4.2, "price_level": "低", "contact": "李经理 139-0755-8811", "aliases": ["恒力"]},
+  {"id": "SUP-003", "name": "蓝天电子科技", "categories": ["控制板", "电子元件"], "lead_time_days": 10, "rating": 4.6, "price_level": "高", "contact": "张工 136-0666-2333", "aliases": ["蓝天"]},
+  {"id": "SUP-004", "name": "宏达包装制品", "categories": ["纸箱", "泡沫", "包装材料"], "lead_time_days": 5, "rating": 4.0, "price_level": "低", "contact": "赵经理 135-1111-2222", "aliases": ["宏达"]},
+  {"id": "SUP-005", "name": "鑫源金属材料", "categories": ["钢板", "铝材", "金属材料"], "lead_time_days": 15, "rating": 4.4, "price_level": "中", "contact": "陈经理 137-3333-4444", "aliases": ["鑫源"]},
+  {"id": "SUP-006", "name": "顺捷密封件", "categories": ["密封圈", "橡胶件"], "lead_time_days": 8, "rating": 4.1, "price_level": "低", "contact": "刘经理 150-5555-6666", "aliases": ["顺捷"]}
+]

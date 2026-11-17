@@ -1,0 +1,4 @@
+[
+  {"order_id": "PO-2026-1001", "supplier_id": "SUP-001", "sku": "A003", "quantity": 200, "status": "已下单", "created_at": "2026-11-10", "note": "轴承补库存，对应运单 LG-2026-0001"},
+  {"order_id": "PO-2026-1002", "supplier_id": "SUP-004", "sku": "C001", "quantity": 500, "status": "已下单", "created_at": "2026-11-12", "note": "纸箱常规补货"}
+]
