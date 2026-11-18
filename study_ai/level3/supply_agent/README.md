@@ -12,17 +12,24 @@
 ## 架构图
 
 ```
-你（终端）
+你（终端 或 浏览器 localhost:8000）
  │
  ▼
-agent.py（乙方/客户端，LangChain create_agent + qwen3.7-flash）
- │  经 MCPAdapter 按角色拉起 MCP Server 子进程，走 stdio 管道说 JSON-RPC
+agent.py / web.py ——两个门脸一个后厨（L3 起）
+ │  共用 build_agent() + run_turn()（公共件住 agent.py）
+ │  LangChain create_agent + qwen3.7-flash
+ │
+ │  经 MCPAdapter 按角色挂载六座 MCP Server（挂载即开关，APP_ROLE 说了算）：
+ │  传输按座自选（L2）——stdio 子进程（默认）或 HTTP 常驻（--http，Bearer 认证）
  ├── inventory_server.py   库存账（读 + 收货入库/销售出库写，跨账本）
  ├── logistics_server.py   运单账（只读）                ← 两头共用的核心
  ├── supplier_server.py    供应商账（只读）   ┐ 买手侧
  ├── procurement_server.py 采购单账（写，闸门）┘
  ├── customer_server.py    客户账（只读）     ┐ 卖手侧
  └── sales_server.py       销售单账（写，闸门）┘
+
+ Docker（L5）：一个镜像七个容器——六座全 --http + web，
+ 经 compose 网络互访（服务名即主机名），账本住卷里
 ```
 
 **APP_ROLE 挂载即开关**（trader 中间商=全挂 / buyer 只买 / seller 只卖）：
@@ -43,8 +50,8 @@ JSON 文件**——数据只能从工具过，这就是 MCP 的甲乙方合同�
 async with MCPAdapter(config) as adapter:
 ```
 
-1. 按配置拉起 4 个子进程（`sys.executable servers/xxx_server.py`），
-   各开一根 stdio 管道
+1. 按配置拉起子进程（trader 角色六座，`sys.executable servers/xxx_server.py`），
+   各开一根 stdio 管道（被 MCP_TRANSPORT 点名走 HTTP 的座则是连常驻进程）
 2. 每根管道先完成 MCP 握手：客户端发 `initialize` → Server 应答 →
    再发 `tools/list` → Server 把工具的**说明书**（工具名 + docstring +
    参数类型生成的 JSON Schema）递回来
@@ -62,7 +69,7 @@ async with MCPAdapter(config) as adapter:
 agent.py: history + 新问题 → {"messages": [...]} 交给 agent.astream
 │
 ▼ ②LLM 第一醒（想）
-qwen3.7-flash 收到：system prompt(供小链人设+规则) + 历史 + 问题 + 9张工具名片
+qwen3.7-flash 收到：system prompt(供小链人设+规则) + 历史 + 问题 + 16张工具名片
 输出：AIMessage(tool_calls=[{name:"inventory_query_stock", args:{sku:"A003"}}])
 │    ← 这是语义路由：docstring 里写着"查询库存余量"，跟问题对上了
 │      （FoodRAG 要背词表，这里 LLM 自己认路）
@@ -134,10 +141,12 @@ LLM 做的**——如果问题问到"找谁补、几天到"，它才会去串第
 | customer | `search_customers(keyword)` / `get_customer(id)` | 只读（L1） | 与 supplier 对称；品类逐项子串匹配（"轴承"命中"深沟球轴承"） |
 | sales | `create_sales_order(...)` / `get_sales_order(id)` / `cancel_sales_order(...)` | **写**（L1） | 与 procurement 对称：同款闸门/状态机；下单不查库存（先接单后备货） |
 
-## 四座 MCP Server 详介
+## 六座 MCP Server 详介
 
 上面是总表，这里逐座展开：每座 Server 就是一位管账的师傅，工具是他的手艺，
-合同写在 docstring 里。**前三位只读（账房先生，只翻账不动笔），第四位带笔（唯一的写手）**。
+合同写在 docstring 里。**三座带笔（inventory / procurement / sales——收货、
+采购、卖出三本写账），三座只读（supplier / logistics / customer——翻账不动笔）**；
+带笔的都过同款确认闸门。
 
 ### 1. inventory — 库存管家（servers/inventory_server.py）
 
@@ -258,7 +267,8 @@ SELL=customer+sales）+ system prompt 里怎么介绍公司业务边界。**Serv
 一行不动**——"不挂载 = 不存在"，LLM 工具名片里没有销售工具，用户要卖货
 它只能礼貌拒绝（buyer 模式实测）。
 
-前置：`.env` 里有 `DASHSCOPE_API_KEY`；依赖 `langchain[mcp]`（已装，
+前置：`.env` 里有 `DASHSCOPE_API_KEY`（模板见 `.env.example`，L2 起另有
+两把钥匙 `MCP_API_KEY`/`WEB_API_TOKEN`）；依赖 `langchain[mcp]`（已装，
 含 fastmcp/mcp 运行时）。单独调试某个 Server：`python servers/inventory_server.py`
 （stdio 模式，启动后等管道消息，不响不是坏了）。
 
@@ -503,12 +513,12 @@ MCP Server 是子进程。裸 `"python"` 由 PATH 说了算，容易飘到系统
 
 | 阶段 | 一句话 | 本项目活例子 | 上生产升级点 |
 |---|---|---|---|
-| ① 设计 | 甲方想清楚卖什么能力 | 4 本账 → 4 个 Server，9 把工具读写分离 | 能力清单评审：谁可调用、限流多少 |
+| ① 设计 | 甲方想清楚卖什么能力 | 6 本账 → 6 个 Server，16 把工具读写分离 | 能力清单评审：谁可调用、限流多少 |
 | ② 开发 | Server 侧把工具写好 | FastMCP `@tool()`，docstring 即合同 | 真数据库、并发锁、事务 |
 | ③ 接入 | 客户端挂载 + 教 LLM 规矩 | MCPAdapter config + system prompt | 远程 HTTP 接入 + 认证 |
 | ④ 调试 | 分层定位：Server 单练还是合练出问题 | trace 两行打印 + 哈希比对 | Inspector + 日志链路追踪 |
 | ⑤ 测试 | 函数级 → 端到端 → 彩蛋 | 闸门单测 + 六连测 + 语义路由 | 回归考卷 + CI 每次必跑 |
-| ⑥ 上线 | 本地子进程 → 常驻服务 | stdio 拉起 4 个子进程 | HTTP Server + 监控 + 版本化 |
+| ⑥ 上线 | 本地子进程 → 常驻服务 | L2 混合传输（stdio+HTTP 按座选）→ L5 Docker 七容器 | 云上部署 + 监控 + 版本化 |
 
 ### ① 设计：甲方想清楚卖什么能力
 
@@ -517,7 +527,8 @@ MCP Server 是子进程。裸 `"python"` 由 PATH 说了算，容易飘到系统
 1. **能力选型**：MCP 三能力（Tools/Resources/Prompts）里卖哪个？
    本项目只卖 Tools——LLM 要的是"帮我查/帮我办"，不是"给我看文件"。
 2. **切 Server**：按业务域切，一域一 Server 一账本。库存/供应商/物流/采购
-   四个域天然独立，单崩单修，将来单独替换任何一个都不惊动别人。
+   /客户/销售六个域天然独立，单崩单修，将来单独替换任何一个都不惊动别人
+   （L1 卖出闭环就是活证据：长出两座新 Server，旧四座一行没动）。
 3. **每把工具的合同**，五问定死：
    - 读还是写？（读随便调；写要过闸门——读写分离是第一道安全线）
    - 参数是什么类型？（`sku: str`、`quantity: int`——类型即合同，LLM 照 schema 填空）
@@ -562,7 +573,7 @@ config = {"mcpServers": {
                   "args": [".../inventory_server.py"],
                   "transport": "stdio"}}}
 async with MCPAdapter(config) as adapter:
-    tools = await adapter.list_tools()          # 9 把工具到手
+    tools = await adapter.list_tools()          # 16 把工具到手
     agent = create_agent(model, tools, system_prompt=SYSTEM_PROMPT)
 ```
 
@@ -578,6 +589,9 @@ async with MCPAdapter(config) as adapter:
 **上生产的脑子**：本地 stdio 换远程 HTTP——config 从 `command/args` 换成
 `{"url": "https://...", "transport": "streamable-http"}`，Server 常驻运行，
 再加认证头。接入代码只改 config 不改逻辑，这就是协议标准化的红利。
+**L2 已亲手排练**：`MCP_TRANSPORT=inventory:http` 按座点名，混合模式下
+六连测全绿；L5 容器里六座全走 HTTP（url 主机名换成 compose 服务名，
+又是零代码改动）。
 
 ### ④ 调试：分层定位
 
@@ -612,19 +626,21 @@ Server 进程崩溃自动重启 + 告警。
 
 ### ⑥ 生产上线：本地子进程 → 常驻服务
 
-本项目形态：**本地 stdio**——agent 拉起子进程，同机管道通信。
-安全靠两道：确认闸门（协议内的锁）+ 本地进程（协议外的墙，外人根本连不上）。
+本项目形态（L2~L5 演化后）：**默认本地 stdio，按座可切 HTTP 常驻，L5 起
+还有 Docker 七容器整 deploy**——同一份代码三种跑法。安全靠三道：确认闸门
+（协议内的锁）+ Bearer 静态 key（HTTP 座的门禁，L2）+ 容器网络隔离
+（六座 MCP 只在内网互访，唯一对外只开 web 的 8000，L5）。
 
-上生产逐项换血：
+本项目已经排练过的换血（Mock → 生产对照，左列全部亲手做过）：
 
-| 本项目（Mock） | 生产版 |
+| 本项目已排练 | 生产版还要加 |
 |---|---|
-| stdio 子进程，agent 开机拉起 | HTTP 常驻服务（streamable_http），运维独立部署扩容 |
-| 谁都能调（本机即权限） | 认证授权（API key / OAuth），按角色限工具 |
-| JSON 文件账本 | 数据库 + 事务 + 备份 |
+| stdio 子进程 + HTTP 常驻按座并存（L2 混合传输） | 云上部署、按流量独立扩容 |
+| Bearer 静态 API key（MCP 内网一把 + Web 外网一把） | OAuth / 按角色限工具 |
+| JSON 文件账本 + 卷持久化（Docker 重启不丢账） | 数据库 + 事务 + 备份（另立仓库的真系统上 SQLite） |
 | 写前复述确认 | 审批流 + 审计日志（谁在何时下了什么单） |
-| print 大法 trace | 结构化日志 + 监控大盘 + 告警 |
-| 工具 schema 随便改 | **版本化**：schema 变更 = 合同变更，老客户端要兼容期 |
+| JSON 行格式日志，session_id 可 grep 串链（L4） | 监控大盘 + 告警 |
+| Docker Compose healthcheck + 自动重启（L5） | 版本化：schema 变更 = 合同变更，老客户端要兼容期 |
 
 最后一行最容易踩：工具的参数/返回一改，所有挂载它的 Agent 端同时受影响——
 **Server 的 docstring 不是注释，是对外 API**。
